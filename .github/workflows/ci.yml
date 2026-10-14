@@ -17,8 +17,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
+      # BUILD FIRST. `tests/client-bundle.spec.ts` executes the built artifact
+      # (`lib/client.js`), so the suite is documented as `pnpm run build && pnpm test`.
+      # It passes after a plain install only because that install's `prepare` already
+      # built — a dependency on install behaviour, not on this order, and one that an
+      # `--ignore-scripts` install (or a failing `prepare`) turns into a confusing
+      # "cannot find lib/client.js" instead of the failure that actually happened.
+      - run: pnpm run build
       # The PowerShell semantics suite skips itself on a host with no shell
       # (Linux runners have `pwsh` via the image; when it is absent the suite
       # reports skips rather than failures).
       - run: pnpm test
-      - run: pnpm run build

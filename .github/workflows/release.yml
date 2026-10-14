@@ -23,8 +23,9 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
-      - run: pnpm test
+      # Build before test: the client-bundle suite runs the built `lib/client.js`.
       - run: pnpm run build
+      - run: pnpm test
       - run: npm publish --provenance
       - uses: softprops/action-gh-release@v2
         with:

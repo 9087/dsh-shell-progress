@@ -149,11 +149,20 @@ describe.skipIf(!available)('instrumentation preserves command semantics', () =>
         expect(markerCount(marked.stdout, nonce)).toBe(steps.length)
       })
 
-      it('writes nothing to stderr', async () => {
+      it('adds nothing to stderr', async () => {
         const nonce = createNonce()
         const steps = splitSteps(entry.command).steps
+        const plain = await pwsh(entry.command)
         const marked = await pwsh(instrument(entry.command, steps, nonce))
-        expect(marked.stderr.trim()).toBe('')
+        // The invariant is what INSTRUMENTATION adds, so it is measured against the
+        // same command run plain. Asserting an empty stderr instead conflated two
+        // different things: a probe whose own command cannot run on this host —
+        // `cmd.exe` on Linux, which is exactly where this used to fail — writes to
+        // stderr by itself, and that is the host's business, not ours. On Windows
+        // `plain.stderr` is empty, so this is the same assertion it always was.
+        expect(marked.stderr).toBe(plain.stderr)
+        expect(marked.stderr).not.toContain('__DSH_STEP_')
+        expect(marked.stderr).not.toContain(nonce)
       })
     })
   }
