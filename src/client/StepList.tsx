@@ -131,13 +131,22 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, expanded, o
             <span className={styles.caret} aria-hidden="true" />
           </button>
         ) : (
-          <span className={styles.toggleSpacer} aria-hidden="true" />
+          <span className={styles.toggleSpacer} data-toggle-spacer="true" aria-hidden="true" />
         )}
-        <pre className={styles.code}>{commandContent(row.text, toolName)}</pre>
-        {duration === null ? null : <span className={styles.time} data-time="true">[{duration}]</span>}
+        {/*
+         * The command and its clock are ONE text flow, not two boxes. As a separate flex
+         * item the clock was pushed to the container's edge: stranded far right of a short
+         * command, and detached from the end of a wrapped one. Inside the flow it stays
+         * glued to the last character the command occupies, the way a terminal would
+         * append it — and it wraps with the text when the text wraps.
+         */}
+        <div className={styles.code} data-code="true">
+          {commandContent(row.text, toolName)}
+          {duration === null ? null : <span className={styles.time} data-time="true">[{duration}]</span>}
+        </div>
       </div>
       {open ? (
-        <pre className={styles.output} aria-label={labels.outputLabel}>{row.output}</pre>
+        <pre className={styles.output} data-output="true" aria-label={labels.outputLabel}>{row.output}</pre>
       ) : null}
     </div>
   )

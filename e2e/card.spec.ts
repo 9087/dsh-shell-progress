@@ -172,7 +172,7 @@ test.describe('the shell_progress card in a real shell', () => {
     const segments = card.locator('[role="progressbar"] [data-phase]')
     const arrow = card.locator('[data-arrow]').first()
     const firstRow = arrow.locator('..')
-    const firstCode = card.locator('pre').first()
+    const firstCode = card.locator('[data-code]').first()
     const arrowOpacity = async (): Promise<string> =>
       await arrow.evaluate((node) => getComputedStyle(node).opacity)
     // The hover fill lives on the command LINE, not the node: with a child open, a
@@ -222,7 +222,7 @@ test.describe('the shell_progress card in a real shell', () => {
         const style = getComputedStyle(node)
         return `${style.fontFamily}|${style.fontSize}|${style.fontWeight}`
       })
-    const codeFont = await fontOf('pre')
+    const codeFont = await fontOf('[data-code]')
     const timeFont = await fontOf('[data-time]')
     console.log(`[e2e] font code ${codeFont} / time ${timeFont}`)
     expect(timeFont, 'the time renders in a different font from its command').toBe(codeFont)
@@ -230,8 +230,12 @@ test.describe('the shell_progress card in a real shell', () => {
     // The command line is HIGHLIGHTED by language, and in the SHELL'S token colours:
     // each run must be a span whose colour is a `--shiki-*` custom property, which keeps
     // theming — the dark overrides included — the theme's business rather than ours.
-    const tokenColours = await card.locator('[data-headline] pre').first().evaluate((node) =>
-      Array.from(node.querySelectorAll('span')).map((span) => (span as HTMLElement).style.color))
+    // `:not([data-time])` because the clock now lives inside the command's own text flow
+    // (that is what keeps it glued to the last character), so a bare `span` query would
+    // count it as a token: it carries no colour and would add an empty entry to what is
+    // supposed to be a list of highlighted runs.
+    const tokenColours = await card.locator('[data-code]').first().evaluate((node) =>
+      Array.from(node.querySelectorAll('span:not([data-time])')).map((span) => (span as HTMLElement).style.color))
     console.log(`[e2e] command token colours ${JSON.stringify(tokenColours)}`)
     expect(tokenColours.length, 'the command line has no highlighted runs').toBeGreaterThan(0)
     expect(
@@ -333,19 +337,45 @@ test.describe('the shell_progress card in a real shell', () => {
     // marker is a DRAWN triangle, so its state is its transform, not its text.
     const toggle = card.locator('[data-toggle]').first()
     const node = toggle.locator('../..') // marker -> command line -> node
-    const childCount = async (): Promise<number> => await node.locator('pre').count()
+    const childCount = async (): Promise<number> => await node.locator('[data-output]').count()
     const caretAngle = async (): Promise<string> =>
       await toggle.locator('span').first().evaluate((element) => getComputedStyle(element).transform)
     expect(await caretAngle(), 'a closed node does not start with a right-pointing triangle').toBe('none')
-    expect(await childCount(), 'a node shows its child before being opened').toBe(1)
+    expect(await childCount(), 'a node shows its child before being opened').toBe(0)
     await toggle.click()
     await page.waitForTimeout(120)
     expect(await caretAngle(), 'the triangle did not turn to point down').toContain('matrix')
-    expect(await childCount(), 'opening the marker did not reveal the child').toBe(2)
+    expect(await childCount(), 'opening the marker did not reveal the child').toBe(1)
     await toggle.click()
     await page.waitForTimeout(120)
     expect(await caretAngle(), 'the triangle did not turn back').toBe('none')
-    expect(await childCount(), 'closing the marker did not hide the child again').toBe(1)
+    expect(await childCount(), 'closing the marker did not hide the child again').toBe(0)
+
+    // Three things a wrapped command used to get wrong, all measured rather than eyeballed.
+    //
+    // 1. The caret column is an ABSOLUTE width. It was `ch`, and `ch` resolves against the
+    //    element's OWN font — the toggle is a `<button>`, which does not inherit the page
+    //    font — so the button and the spacer came out different widths and a command's
+    //    left edge moved depending on whether its node had a caret.
+    // 2. Every command starts at the same x, caret or no caret.
+    // 3. The caret is centred on the FIRST LINE, not on the whole command, so a wrapped
+    //    command does not leave it floating beside the last line.
+    const marker = await card.locator('[data-toggle]').first().evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return { width: getComputedStyle(element).width, centre: rect.top + rect.height / 2 }
+    })
+    const codeEdges = await card.locator('[data-code]').evaluateAll((nodes) =>
+      nodes.map((node) => node.getBoundingClientRect().x))
+    const firstLineCentre = await card.locator('[data-code]').first().evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.top + Number.parseFloat(getComputedStyle(element).lineHeight) / 2
+    })
+    const edgeSpread = Math.max(...codeEdges) - Math.min(...codeEdges)
+    console.log(`[e2e] marker width ${marker.width}; command left edge spread ${String(edgeSpread.toFixed(2))}px; caret centre ${marker.centre.toFixed(2)} vs first line centre ${firstLineCentre.toFixed(2)}`)
+    expect(codeEdges.length, 'no command line rendered, so nothing was measured').toBeGreaterThan(1)
+    expect(marker.width, 'the caret column is not the marker width').toBe('8px')
+    expect(edgeSpread, 'commands do not all start at the same x').toBeLessThan(0.5)
+    expect(Math.abs(marker.centre - firstLineCentre), 'the caret is not centred on the first line').toBeLessThan(1)
 
     // The bar no longer navigates: its segments are for READING progress, so a click on
     // one must leave the tree exactly as it was. Scoped to `[data-step]`, because the

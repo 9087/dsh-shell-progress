@@ -12,8 +12,13 @@
   --step-size: 10px;
   --step-leading: 15px;
   /* One marker column, shared by the toggle, its spacer and the child indent, so the
-   * three line up by construction instead of by matching numbers. */
-  --step-marker: 1.2ch;
+   * three line up by construction instead of by matching numbers.
+   *
+   * In PX, never `ch`: the toggle is a `<button>`, a button does NOT inherit the page
+   * font, and `ch` resolves against the element's OWN font — so `1.2ch` came out one
+   * width on the button and another on the spacer `<span>`, and a command's left edge
+   * moved depending on whether its node had a caret to show. */
+  --step-marker: 8px;
   font: var(--dsw-font-markdown-code-block-small);
   font-size: var(--step-size);
   line-height: var(--step-leading);
@@ -43,10 +48,16 @@
   opacity: 1;
 }
 
-/* The command line: marker, command, time — and the only thing a hover highlights. */
+/* The command line: marker, command (with its clock inside it) — and the only thing a
+ * hover highlights.
+ *
+ * `flex-start`, not `baseline`: the clock now lives INSIDE the command's own text flow,
+ * so there is nothing left to baseline-align, and a baseline-aligned multi-line block
+ * takes its baseline from a line other than the first — which is exactly how a wrapped
+ * command used to drag everything around it out of place. */
 .headline {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 0.6em;
   min-width: 0;
   /* The hover fill needs a hair of room around the glyphs; `.steps` hands this 1px
@@ -68,15 +79,19 @@
 }
 
 /* The tree marker. A `<button>`, so it is reachable by keyboard and carries
- * `aria-expanded`. `align-self: center` because the row aligns on the text baseline,
- * and a box with no text has no baseline to align on. */
+ * `aria-expanded`.
+ *
+ * `height: var(--step-leading)` is ONE line box, and the triangle is centred inside it:
+ * that puts the caret beside the FIRST line of the command. A marker centred on the
+ * whole headline drifts down a wrapped command, sitting next to the third line of text
+ * rather than next to the line it opens. */
 .toggle {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  align-self: center;
   width: var(--step-marker);
+  height: var(--step-leading);
   padding: 0;
   border: 0;
   background: none;
@@ -104,10 +119,13 @@
   transform: rotate(90deg);
 }
 
-/* Keeps the column of a step that printed nothing, so every command starts alike. */
+/* Keeps the column of a step that printed nothing, so every command starts alike — the
+ * same box as the toggle in every dimension, which is what makes "with a caret" and
+ * "without one" line up rather than merely look close. */
 .toggleSpacer {
   flex: 0 0 auto;
   width: var(--step-marker);
+  height: var(--step-leading);
 }
 
 /* A step that has not started is dimmer than the ones that have: the list is a record
@@ -142,10 +160,12 @@
   white-space: pre-wrap;
 }
 
-/* Right-aligned at the end of its own line, and tabular so a clock counting up
- * does not shuffle the text beside it. */
+/* The clock rides in the command's own text flow, right behind the last character the
+ * command occupies — it is the LAST thing in that line, not a column at the right edge
+ * of the card. `margin-left` rather than a literal space: with `pre-wrap` a trailing
+ * space at a wrap point would hang a stray gap off the end of the line. */
 .time {
-  flex: 0 0 auto;
+  margin-left: 0.6em;
   color: var(--dsw-alias-label-caption, inherit);
   font-variant-numeric: tabular-nums;
 }
