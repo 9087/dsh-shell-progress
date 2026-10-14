@@ -49,6 +49,20 @@ suite, builds, and publishes with `npm publish --provenance`.
    If the npm website does show a Trusted Publisher form for a name it has
    never seen, use that instead and skip this step.
 
+   That publish creates **`0.1.0`** — `npm publish` sends whatever
+   `package.json` says and computes nothing — and npm refuses to publish the
+   same version twice, so the number is spent the moment the command returns.
+   A bad `0.1.0` is therefore not fixable in place: publish `0.1.1`.
+   `npm unpublish` is a 72-hour, no-dependents escape hatch, not a revert.
+
+   **Tag the commit you published.** The bootstrap publish leaves no tag, and
+   `release-it` derives the NEXT version from the last tag, so without one its
+   first run proposes a version that is already on the registry:
+
+   ```sh
+   git tag v0.1.0 <the commit that was published>
+   ```
+
 3. **Configure Trusted Publishing on npmjs.com** — this repo uses OIDC, so
    there is **no `NPM_TOKEN` secret anywhere**:
 
