@@ -1,0 +1,8 @@
+# e2e-only overlay: mount the session fixture into the throwaway profile.
+#
+# Applied last, after every bundle layer. A relative `name` on an inserted row is
+# rewritten to a `file://` URL beside this file by dsh-app-boot, so the fixture
+# needs no package manifest, no build step and no node_modules link.
+- insert:
+    - id: e2e-seed-session
+      name: ./seed-session.mjs

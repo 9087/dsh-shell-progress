@@ -1,0 +1,80 @@
+/* The header line is the shell's own DisclosureRow, which owns the 24px height,
+ * the chevron on the LEFT, the hover colour and the title typography. This file
+ * supplies the pieces the shell's own tool rows also supply — the separator, the
+ * summary, and the expanded body — with the shell's numbers. */
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The shell's separator is a 2×2px dot between 8px margins, NOT a `·` inside a
+ * composed title string: two spaces around a middot is visibly narrower, which is
+ * exactly what a reader notices as "not the same". */
+.sep {
+  flex: 0 0 auto;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background-color: var(--dsw-alias-label-caption, currentColor);
+}
+
+/* The model's own description, behaving as the shell's summary does: one line,
+ * ellipsis rather than wrap, and the secondary size. */
+.summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+}
+
+/* Indented to the title, clear of the leading glyph: the shell's own leading
+ * slot is `calc(16px + delta)` wide plus a 6px gap. */
+.progressLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: calc(22px + var(--dsh-content-font-delta, 0px));
+  padding-bottom: 2px;
+}
+
+/* The list does NOT scroll: the transcript outside it already does, and a second
+ * scroll region inside means two scrollbars competing for one wheel gesture. It was
+ * also a sharp edge — an `overflow-y` box computes `overflow-x: auto` too, so a row
+ * even 1px wider than this box gave the container a horizontal scroll range, and the
+ * browser used it: every command line shifted sideways the moment a row was hovered. */
+.steps {
+  /* `21px + 1px` of the row's own padding keeps every command line at the same 22px
+   * it has always been at, while the row still has 1px of fill around it. */
+  padding-left: calc(21px + var(--dsh-content-font-delta, 0px));
+  /* 7px on the right: the list otherwise runs right up to the card's edge, and the 1px
+   * the row itself carries is not enough margin to read as one. */
+  padding-right: 7px;
+}
+
+.counter {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  margin: 0;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+}
+
+/* TEMPORARY, while-running only: it costs nothing on a settled card and it is
+ * the one place a live run can be inspected from a screenshot. */
+.dbg {
+  margin: 0;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  line-height: 16px;
+}

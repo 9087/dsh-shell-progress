@@ -1,0 +1,5 @@
+# dsh-shell-progress bundle patch: the row that mounts the step-progress
+# plugin into every profile that lists this bundle.
+- insert:
+    - id: shell-progress
+      name: dsh-shell-progress

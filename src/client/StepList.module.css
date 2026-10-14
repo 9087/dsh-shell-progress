@@ -1,0 +1,172 @@
+/* A step is a tree node: its command line with the time beside it, and that step's
+ * output as a CHILD — indented under the command, closed until asked for. Nothing
+ * occupies a column to the left of either line. */
+.list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+  /* The shell's own code token supplies family, weight and style; only the size and
+   * the leading are overridden, one notch down from `11px/16px`. The two custom
+   * properties are the single source of truth for that size, because the `<pre>`
+   * elements below have to repeat the declaration (see the note on `.code`). */
+  --step-size: 10px;
+  --step-leading: 15px;
+  /* One marker column, shared by the toggle, its spacer and the child indent, so the
+   * three line up by construction instead of by matching numbers. */
+  --step-marker: 1.2ch;
+  font: var(--dsw-font-markdown-code-block-small);
+  font-size: var(--step-size);
+  line-height: var(--step-leading);
+}
+
+/* No padding and no background of its own: the node is a container, and the hover
+ * fill belongs to the command line inside it (see `.headline`). */
+.row {
+  position: relative; /* the running marker is positioned against this row */
+  display: flex;
+  flex-direction: column;
+}
+
+/* `>` marks WHERE THE COMMAND IS, not where the pointer is: it rides the step that is
+ * executing right now, so the live position is readable without hovering — the same
+ * glyph the native command row uses for its own prompt. It sits inside `.steps`'s own
+ * padding, so it consumes NO width, and it is in the DOM whether or not it is showing,
+ * so revealing it moves nothing. */
+.arrow {
+  position: absolute;
+  left: -1.3em;
+  color: var(--dsw-alias-label-primary, currentColor);
+  opacity: 0;
+}
+
+.row[data-phase='running'] .arrow {
+  opacity: 1;
+}
+
+/* The command line: marker, command, time — and the only thing a hover highlights. */
+.headline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  min-width: 0;
+  /* The hover fill needs a hair of room around the glyphs; `.steps` hands this 1px
+   * back on the left, so the command text keeps its column. */
+  padding: 0 1px;
+  border-radius: 4px;
+}
+
+/* Only a line that has something to open is clickable, so only it shows a pointer. */
+.row[data-toggleable='true'] .headline {
+  cursor: pointer;
+}
+
+/* Hover answers "which line is this segment?": the theme's own interactive fill, on the
+ * command line only — with a child open, covering the whole node would highlight
+ * output the pointer is nowhere near. */
+.row[data-hovered='true'] .headline {
+  background-color: var(--dsw-alias-interactive-bg-hover, transparent);
+}
+
+/* The tree marker. A `<button>`, so it is reachable by keyboard and carries
+ * `aria-expanded`. `align-self: center` because the row aligns on the text baseline,
+ * and a box with no text has no baseline to align on. */
+.toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: var(--step-marker);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-secondary, inherit);
+  cursor: pointer;
+}
+
+/* The disclosure triangle, DRAWN rather than typed. A `+` at this size is two thin
+ * strokes in a mostly empty cell, and no monospace face here carries `▶`/`▼` at a
+ * dependable width and baseline — the browser would fall back to another font and the
+ * marker would drift. Borders give an exact size, an exact colour (`currentColor`, so
+ * it follows the theme) and no font fallback at all. */
+.caret {
+  width: 0;
+  height: 0;
+  /* A right-pointing wedge: the left border is the visible triangle, the top and
+   * bottom borders are the transparent halves that give it its height. */
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid currentColor;
+}
+
+/* Open: the same triangle, turned to point down. */
+.row[data-open='true'] .caret {
+  transform: rotate(90deg);
+}
+
+/* Keeps the column of a step that printed nothing, so every command starts alike. */
+.toggleSpacer {
+  flex: 0 0 auto;
+  width: var(--step-marker);
+}
+
+/* A step that has not started is dimmer than the ones that have: the list is a record
+ * of what RAN, and the lines still waiting are context rather than content. Applied to
+ * the command line rather than the whole node so the running marker keeps its weight. */
+.row[data-phase='pending'] .headline {
+  opacity: 0.5;
+}
+
+/* Both of these are `<pre>` elements, and `<pre>` carries a user-agent
+ * `font-family: monospace`. An element's OWN rule beats an INHERITED value, so the
+ * list's font has to be declared ON them: relying on inheritance is what made the
+ * command render in the browser's default monospace while its time — a `<span>`, which
+ * inherits normally — got the shell's code font. The e2e measures both and requires
+ * them to match. */
+.code,
+.output {
+  font: var(--dsw-font-markdown-code-block-small);
+  font-size: var(--step-size);
+  line-height: var(--step-leading);
+  /* `break-all`, not `anywhere`: a terminal wraps at the column where the text runs
+   * out, whatever character is there. `anywhere` would still prefer a space when one
+   * is in reach, which is word wrapping — not what pwsh or bash does. */
+  word-break: break-all;
+}
+
+.code {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--dsw-alias-label-primary, inherit);
+  white-space: pre-wrap;
+}
+
+/* Right-aligned at the end of its own line, and tabular so a clock counting up
+ * does not shuffle the text beside it. */
+.time {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The child node: indented by exactly the marker column plus the headline's gap, so it
+ * starts under the command rather than under the marker. No rule and no quote styling —
+ * the indent is the whole statement that this belongs to the step above it. */
+.output {
+  margin: 0;
+  padding-left: calc(var(--step-marker) + 0.6em + 1px);
+  color: var(--dsw-alias-label-primary, inherit);
+  white-space: pre-wrap;
+}
+
+.preamble {
+  margin: 0 0 4px;
+  color: var(--dsw-alias-label-caption, inherit);
+}
+
+.notice {
+  margin: 0;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+}

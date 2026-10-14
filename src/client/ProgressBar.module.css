@@ -1,0 +1,135 @@
+/* The bar owns its whole width. Every level sets an explicit size so no parent
+ * can collapse it: `flex-basis: 0` plus `min-width: 0`, nested inside a
+ * shrink-to-fit wrapper, is what made this bar invisible once. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  line-height: 1;
+}
+
+.track {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  /* The FALLBACK seam, for the first paint and for a bar too narrow to give every step
+   * one device pixel. Once measured, `ProgressBar.tsx` hands exact device-pixel widths
+   * down as inline styles and overrides both this and the flex sizing: a CSS `gap` and
+   * `flex: 1 1 0` leave fractional widths for the browser to snap, so at 125% scaling
+   * the same 1px seam comes out 1 physical pixel in one place and 2 in another. */
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 48px;
+  /* 9px: the bar should read as a real progress bar, not a hairline. Nothing has to
+   * clear it now that the linked segment wears no ring. */
+  height: 9px;
+}
+
+.segmentWrap {
+  display: flex;
+  /* Centred, so a lifted segment grows UP and DOWN by the same amount. With the
+   * default stretch the lift could only extend downward, which reads as the bar
+   * sagging rather than the segment rising. */
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 6px;
+}
+
+.segment {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background-color: var(--dsw-alias-bg-skeleton, currentColor);
+  cursor: pointer;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary, currentColor);
+  outline-offset: 1px;
+}
+
+/* A segment lifts when the pointer is on it, and when the LIST points at it. Pure
+ * vertical, so no segment's width ever changes — which is what makes it safe on a
+ * bar whose every segment is already a solid block of colour, where a fill or an
+ * opacity cue would have nothing to show. */
+.segment:hover,
+.segment[data-linked='true'] {
+  height: 13px;
+}
+
+.segment[data-phase='done'][data-tone='normal'] {
+  background-color: var(--dsw-alias-state-success-primary, currentColor);
+}
+
+.segment[data-phase='done'][data-tone='slow'] {
+  background-color: var(--dsw-alias-state-warn-primary, currentColor);
+}
+
+.segment[data-phase='done'][data-tone='overdue'],
+.segment[data-phase='failed'] {
+  background-color: var(--dsw-alias-state-error-primary, currentColor);
+}
+
+/* The running segment does NOT breathe. Opacity used to pulse between 0.45 and
+ * 0.7, which read as flicker rather than as progress — the clock beside it is
+ * already the moving part. The tone still escalates with time: `slow` past five
+ * seconds, `overdue` past thirty. */
+.segment[data-phase='running'] {
+  background-color: var(--dsw-alias-state-success-tertiary, currentColor);
+  opacity: 0.7;
+}
+
+.segment[data-phase='running'][data-tone='slow'] {
+  background-color: var(--dsw-alias-state-warn-primary, currentColor);
+}
+
+.segment[data-phase='running'][data-tone='overdue'] {
+  background-color: var(--dsw-alias-state-error-primary, currentColor);
+}
+
+/* "Not finished yet" is ONE translucency. The un-started steps and the running
+ * step sit at the same alpha, so translucency reads as "still to come" rather
+ * than as "whichever colour happens to be showing". An earlier version pulsed the
+ * running segment between fully opaque and half transparent, which is exactly why
+ * amber and red looked solid while the pale fill looked see-through, and why the
+ * running segment's transparency looked unstable. */
+.segment[data-phase='pending'] {
+  background-color: var(--dsw-alias-bg-skeleton, currentColor);
+  opacity: 0.5;
+}
+
+.solid {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 48px;
+  height: 6px;
+  border-radius: 2px;
+  background-color: var(--dsw-alias-bg-skeleton, currentColor);
+  overflow: hidden;
+}
+
+.solidFill {
+  display: block;
+  height: 100%;
+  background-color: var(--dsw-alias-state-business-primary, currentColor);
+  transition: width 200ms linear;
+}
+
+.elapsed {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .solidFill {
+    transition: none;
+  }
+}
