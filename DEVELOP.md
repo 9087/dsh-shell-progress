@@ -30,6 +30,17 @@ pnpm install --registry=https://registry.npmmirror.com
 The unit suite reads `src/` directly, so it needs no build. The client bundle
 does: the shell serves the built `lib/client.js`, not the source.
 
+**The client bundle is large on purpose.** Shiki's core and the two grammars the
+step list highlights (`powershell`, `shellscript`) are INLINED: `noExternal` in
+`build/tsdown.client.ts` bundles everything the loader module table cannot
+answer, which takes `lib/client.js` from ~50 kB to ~480 kB. That is an accepted
+cost, not an oversight — the command highlighting is a feature of the list, and
+the published tarball is still only ~150 kB compressed.
+
+Do NOT "fix" the size by externalising shiki: the table cannot answer
+`require('shiki')`, so that is a guaranteed runtime throw (see the rule above),
+not a smaller bundle.
+
 ## The development loop
 
 - **Client change**: `pnpm run build`, then **restart `dsh web`** and reload the
