@@ -250,6 +250,9 @@ const OUTPUT_SCHEMA = {
               line: { type: 'integer', required: true },
               text: { type: 'string', required: true },
               output: { type: 'string', required: true },
+              // NOT required: a record persisted before this field existed still
+              // validates, and the client reads a missing value as zero.
+              droppedChars: { type: 'integer' },
               startedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
               endedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
             },

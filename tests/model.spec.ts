@@ -223,6 +223,29 @@ describe('viewFromSettled', () => {
     expect(view.steps.map((step) => step.phase)).toEqual(['done'])
     expect(view.done).toBe(1)
   })
+
+  it('carries the count of what a truncated step lost, and reads an old record as complete', () => {
+    const truncated = viewFromSettled({
+      v: 1,
+      instrumented: true,
+      refused: false,
+      partial: true,
+      preamble: '',
+      steps: [{ line: 1, text: 'chatty', output: 'kept', droppedChars: 1234, startedAt: 0, endedAt: 5 }],
+    }, false)
+    expect(truncated.steps[0]?.droppedChars).toBe(1234)
+    // A record persisted BEFORE the field existed reads as a step that lost nothing,
+    // which is what keeps an already-written session rendering exactly as it did.
+    const older = viewFromSettled({
+      v: 1,
+      instrumented: true,
+      refused: false,
+      partial: false,
+      preamble: '',
+      steps: [{ line: 1, text: 'quiet', output: 'kept', startedAt: 0, endedAt: 5 }],
+    }, false)
+    expect(older.steps[0]?.droppedChars).toBe(0)
+  })
 })
 
 describe('block narrowing', () => {

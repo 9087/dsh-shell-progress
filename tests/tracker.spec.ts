@@ -150,6 +150,23 @@ describe('StepTracker output budget', () => {
     expect(tracker.droppedOutput()).toBe(true)
   })
 
+  it('counts the characters the budget dropped, not just that it dropped some', () => {
+    // "Something was dropped" cannot be written on the card: the reader needs the
+    // amount. Each dropped line is charged `length + 1`, exactly as a kept one is, so
+    // kept + dropped is the step's real output size.
+    const { tracker } = trackerOnClock(STEPS, 10)
+    tracker.observe({ kind: 'marker', line: 1 })
+    tracker.observe({ kind: 'text', text: '1234567890' }) // kept: chars becomes 11
+    tracker.observe({ kind: 'text', text: 'dropped' }) // 7 + 1
+    tracker.observe({ kind: 'text', text: 'ab' }) // 2 + 1
+    const kept = tracker.steps()
+    expect(kept[0]?.output).toBe('1234567890')
+    expect(kept[0]?.droppedChars).toBe(11)
+    // A step that stayed inside its budget reports nothing missing.
+    expect(kept[1]?.droppedChars).toBe(0)
+    expect(kept[2]?.droppedChars).toBe(0)
+  })
+
   it('does not flag a run inside its budget', () => {
     const { tracker } = trackerOnClock(STEPS, 100)
     tracker.observe({ kind: 'marker', line: 1 })

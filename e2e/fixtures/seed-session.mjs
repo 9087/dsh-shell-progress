@@ -107,6 +107,20 @@ const SOLE_COMMAND = "& { Start-Sleep -Seconds 20; Write-Output 'one line' }"
 /** The same four-step command under a second call id, so one card can be English-named. */
 const LIVE_CALL_ZH = 'call-live-zh-1'
 
+/**
+ * A step whose output OVERFLOWS the per-step budget (`maxStepOutputChars`, 8192 by
+ * default). The host drops whole lines past it and counts what it dropped; this is the
+ * card that has to say so, and nothing else in the fixture can produce that state.
+ */
+const TRUNCATED_CALL = 'call-live-truncated-1'
+const TRUNCATED_COMMAND = [
+  // TWO lines, deliberately: a single-line command is never instrumented, and its output
+  // is attributed to the PREAMBLE rather than to a step — which has no budget at all, so
+  // it would never truncate anything. The budget is per STEP, so this needs a step.
+  "& { 1..1200 | ForEach-Object { Write-Output ('line ' + $_ + ' padding padding padding') } }",
+  "Write-Output 'done'",
+].join('\n')
+
 /** Every live run this fixture keeps in flight, and the call id each one answers. */
 const LIVE_RUNS = [
   { callId: LIVE_CALL, command: LIVE_COMMAND, description: 'four-step build demo' },
@@ -115,6 +129,8 @@ const LIVE_RUNS = [
   // the language the host/browser resolves — while the summary after the separator is
   // this fixture's argument, so that half has to be published per language to match.
   { callId: LIVE_CALL_ZH, command: LIVE_COMMAND, description: '四步构建演示' },
+  // And the one whose output the budget truncates, for the count the card has to state.
+  { callId: TRUNCATED_CALL, command: TRUNCATED_COMMAND, description: '输出很长的步骤' },
 ]
 
 /** One process-wide flag: `apply` can run again on a reload, the runs must not. */
@@ -278,6 +294,16 @@ export function apply(ctx) {
     callId: LIVE_CALL_ZH,
     name: 'shell_progress_pwsh',
     arguments: JSON.stringify({ command: LIVE_COMMAND, description: '四步构建演示' }),
+  })
+
+  // ...and one whose step prints far past the per-step output budget, so the card has to
+  // state what it is not showing.
+  session.append('tool/call', {
+    turn: 2,
+    step: 1,
+    callId: TRUNCATED_CALL,
+    name: 'shell_progress_pwsh',
+    arguments: JSON.stringify({ command: TRUNCATED_COMMAND, description: '输出很长的步骤' }),
   })
 
   // Started after the transcript is published. The spec waits for the shape it wants

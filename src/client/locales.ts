@@ -17,7 +17,14 @@ export const en = {
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds}s',
   'row.notInstrumented': 'This command ran unmodified — no per-step tracking.',
-  'row.partial': 'Some output was not attributed to a step.',
+  'row.partial': 'Some output could not be shown in full.',
+  /*
+   * Says what the CUT cost, at the cut: the per-step output budget discards whole
+   * lines, and without this a truncated step is indistinguishable from a quiet one.
+   * `chars` counts everything the budget dropped for that step, newlines included —
+   * the same units the budget charges, so kept + dropped is the step's real output.
+   */
+  'row.truncated': '… {chars} more characters not shown',
   'row.expand': 'Show steps',
   'row.collapse': 'Hide steps',
   'row.stepLabel': 'Step {index} of {total}, line {line}',
@@ -38,7 +45,8 @@ export const zh: Record<keyof typeof en, string> = {
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds} 秒',
   'row.notInstrumented': '该命令按原样执行 —— 未逐步骤跟踪。',
-  'row.partial': '部分输出未归属到具体步骤。',
+  'row.partial': '部分输出未能完整显示。',
+  'row.truncated': '… 还有 {chars} 个字符未显示',
   'row.expand': '展开步骤',
   'row.collapse': '收起步骤',
   'row.stepLabel': '第 {index} 步，共 {total} 步，第 {line} 行',

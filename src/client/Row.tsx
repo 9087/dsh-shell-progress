@@ -118,10 +118,12 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
 
   const barLabels: ProgressBarLabels = {
     stepLabel: (row, total) => t('row.stepLabel', { index: row.index, total, line: row.line }),
+    truncated: (chars) => t('row.truncated', { chars }),
   }
   const listLabels: StepListLabels = {
     stepLabel: (row, total) => t('row.stepLabel', { index: row.index, total, line: row.line }),
     outputLabel: t('row.output'),
+    truncated: (chars) => t('row.truncated', { chars }),
     preambleLabel: t('row.preamble'),
     statusDone: t('status.done'),
     statusRunning: t('status.running'),

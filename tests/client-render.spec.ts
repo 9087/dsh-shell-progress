@@ -169,6 +169,23 @@ function singleStepBlock(): Record<string, unknown> {
   }
 }
 
+/** A settled call whose ONE step had its output truncated by the per-step budget. */
+function truncatedBlock(): Record<string, unknown> {
+  const command = 'Get-Content huge.log'
+  return {
+    ...settledBlock(),
+    call: { name: 'shell_progress', argsRaw: JSON.stringify({ command, description: 'chatty step' }) },
+    meta: {
+      v: 1,
+      instrumented: true,
+      refused: false,
+      partial: true,
+      preamble: '',
+      steps: [{ line: 1, text: command, output: 'first line', droppedChars: 1234, startedAt: 0, endedAt: 5 }],
+    },
+  }
+}
+
 /**
  * The four-step settled call with each step's output REPLACED.
  *
@@ -384,7 +401,10 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // that could drift away from them.
     const indent = paletteUse(css, '--step-output-indent')
     expect(indent.declared, 'the output indent is not declared exactly once').toBe(1)
-    expect(indent.consumed, 'the output indent is not used by the output block').toBe(1)
+    // Read TWICE: by the output block, and by the truncation note under it. The note says
+    // what the output is missing, so it belongs on the output's own column rather than at
+    // the row's edge — two owners of one number, which is the point of naming it.
+    expect(indent.consumed, 'the output indent is not used by the output block AND the truncation note').toBe(2)
     expect(css).toContain('--step-output-indent:calc(var(--step-marker) + var(--step-gap) + 1px)')
     expect(css, 'the output still carries the old deeper 24px indent').not.toContain('--step-output-indent:24px')
     // The gap is what makes that column the command's: declared once, read by the
@@ -631,6 +651,19 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // AND it draws its bar. One step is ONE segment, not none: a single-line command
     // used to get a counter and no bar at all, which is the shape this pins.
     expect((html.match(/data-phase="/g) ?? []), 'the single-step card drew no segment').toHaveLength(1)
+  })
+
+  // The truncation count. "Something was dropped" is not enough for a reader looking at
+  // a step and wondering whether the command was quiet or cut — the amount is the answer.
+  // The STEP LIST's copy of this note is measured in a browser instead: a collapsed card
+  // renders no step list here, so a claim about that one would be vacuous.
+  it('states the dropped characters in a truncated step\'s card, and nothing otherwise', async () => {
+    const html = await renderCard(truncatedBlock())
+    expect(html, 'the card does not say how much of the output is missing').toContain('row.truncated chars=1234')
+    expect(html, 'the card has no truncation marker').toContain('data-card-truncated="true"')
+    // A step that lost nothing says nothing: the marker is not decoration.
+    const clean = await renderCard(singleStepBlock())
+    expect(clean, 'a complete step carries a truncation marker').not.toContain('data-card-truncated=')
   })
 
   // The pin for C-6. The browser cannot run a parser, so a bar drawn before the

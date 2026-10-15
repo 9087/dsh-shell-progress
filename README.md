@@ -88,6 +88,13 @@ There is no nonce, no marker and no reordering anywhere the model can read.
 | `maxSteps` | `400` | A command split into more steps than this runs unmodified. |
 | `liveRetentionMs` | `300000` | How long a settled call's live record is kept for a late poll. |
 
+When a step's output passes `maxStepOutputChars`, the lines that do not fit are dropped from
+the CARD's copy, and that step's output is followed by the number of characters that are
+missing — in the step list and in the segment's hover card alike. Without it a truncated
+step reads exactly like a quiet one. The budget is the card's memory, not the tool result:
+the model-visible stdout comes from the shell seam and is unaffected by it (the seam's own
+`truncated` / `spillPath` reporting applies as it always does).
+
 ## How it works
 
 1. **Split.** The command is cut into *top-level steps*: non-empty lines that

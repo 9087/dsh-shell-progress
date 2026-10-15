@@ -50,6 +50,15 @@ export interface StepProgress extends StepLine {
    */
   readonly output: string
   /**
+   * Characters the per-step output budget DISCARDED, or absent/0 when nothing was.
+   *
+   * This is what lets the card state the cut at the cut: `output` alone cannot say
+   * whether it is everything the step printed or the part that fit. Optional on the
+   * wire so a record persisted before this existed still validates — the schema
+   * declares it, and the client reads a missing value as "nothing was dropped".
+   */
+  readonly droppedChars?: number
+  /**
    * Monotonic milliseconds since the run began, or null while the step has not
    * started. Wall-clock would break on a system-time jump, so it is never used.
    */

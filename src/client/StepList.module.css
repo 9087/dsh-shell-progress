@@ -241,6 +241,18 @@
   padding-top: 2px;
 }
 
+/* The cut, stated AT the cut. Dimmer than the output it follows — it is a note ABOUT
+ * that output, not output — and on the command text's own column, like the block above
+ * it. Without it a step whose output the budget truncated is indistinguishable from a
+ * step that printed little. */
+.truncated {
+  margin: 2px 0 0;
+  padding-left: var(--step-output-indent, 15px);
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--step-size, 10px);
+  line-height: var(--step-leading, 15px);
+}
+
 .preamble {
   margin: 0 0 4px;
   color: var(--dsw-alias-label-caption, inherit);

@@ -19,6 +19,12 @@ interface StepState {
   readonly text: string
   readonly lines: string[]
   chars: number
+  /**
+   * Characters the per-step budget DISCARDED, counted the way {@link chars} counts
+   * them (each dropped line plus the newline it ended with). It is what the card
+   * states at the cut, so a reader can tell a truncated step from a complete one.
+   */
+  droppedChars: number
   startedAt: number | null
   endedAt: number | null
 }
@@ -61,6 +67,7 @@ export class StepTracker {
       text: step.text,
       lines: [],
       chars: 0,
+      droppedChars: 0,
       startedAt: null,
       endedAt: null,
     }))
@@ -143,6 +150,7 @@ export class StepTracker {
       line: state.line,
       text: state.text,
       output: joinLines(state.lines),
+      droppedChars: state.droppedChars,
       startedAt: state.startedAt,
       endedAt: state.endedAt,
     }))
@@ -180,7 +188,11 @@ export class StepTracker {
     const state = this.states[this.cursor]
     if (state === undefined) return
     if (state.chars + line.length > this.maxStepOutputChars) {
+      // DROPPED, and counted: the card says how much it is not showing. The count is
+      // `line.length + 1` because that is exactly what the budget would have charged
+      // this line (`chars` below), so "kept + dropped" is the run's real output size.
       this.overBudget = true
+      state.droppedChars += line.length + 1
       return
     }
     state.lines.push(line)

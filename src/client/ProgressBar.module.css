@@ -266,3 +266,12 @@
   margin: 6px 0 0;
   color: var(--dsw-alias-label-caption, inherit);
 }
+
+/* The cut, stated AT the cut, in the card as well: the host's per-step budget dropped
+ * these characters, and the kept text alone would claim the step printed exactly this
+ * much. Distinct from the card's own display clamp above, which shortens for layout and
+ * says so in LINES. */
+.cardTruncated {
+  margin: 2px 0 0;
+  color: var(--dsw-alias-label-caption, inherit);
+}

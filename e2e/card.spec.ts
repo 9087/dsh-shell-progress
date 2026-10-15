@@ -61,6 +61,12 @@ const LIVE_CALL = 'call-live-1'
 const SOLE_CALL = 'call-live-sole-1'
 /** The same four-step command under a second call id, for the README's Chinese figure. */
 const LIVE_CALL_ZH = 'call-live-zh-1'
+/**
+ * A call whose single step prints far past the per-step output budget (8192 characters by
+ * default). The host drops the lines that do not fit and counts them, and the card has to
+ * state that count where the cut is — a truncated step must not read as a quiet one.
+ */
+const TRUNCATED_CALL = 'call-live-truncated-1'
 const MARKER = 'SHELL_PROGRESS_E2E_SESSION='
 
 /** One step's segment count and the numbers that decide "is this laid out". */
@@ -1072,7 +1078,7 @@ test.describe('the shell_progress card in a real shell', () => {
         const englishSession = await waitForMarker(englishHost.logFile, MARKER, 60_000)
         expect(englishSession, `the English fixture never announced its session:\n${tail(englishHost.logFile)}`).toBe(SESSION_ID)
         const english = await captureFigure(
-          browser, englishHost.url, englishSession!, LIVE_CALL, README_SHOT,
+          browser, englishHost.url, englishSession!, 'en-US', LIVE_CALL, README_SHOT,
           'Run a command with shell_progress_pwsh',
         )
         console.log(`[e2e] figure en ${JSON.stringify(english)}`)
@@ -1083,7 +1089,7 @@ test.describe('the shell_progress card in a real shell', () => {
       englishFixture.cleanup()
     }
     const chinese = await captureFigure(
-      browser, host.url, sessionId, LIVE_CALL_ZH, README_SHOT_ZH,
+      browser, host.url, sessionId, 'zh-CN', LIVE_CALL_ZH, README_SHOT_ZH,
       '使用 shell_progress_pwsh 运行命令',
     )
     console.log(`[e2e] figure zh ${JSON.stringify(chinese)}`)
@@ -1118,6 +1124,41 @@ test.describe('the shell_progress card in a real shell', () => {
     expect(soleState.phases, 'the single-line segment is not the running one').toEqual(['running'])
     // The counter is `0/1` while the sole step is in flight, and `1/1` once it is done.
     expect(soleState.counter, 'the single-line card lost its counter').toBe('0/1')
+
+    // ---------------------------------------------------------------------------
+    // THE CUT, STATED AT THE CUT. A step whose output passes the per-step budget loses
+    // whole lines, and the kept text alone reads as everything the step printed: a
+    // truncated step and a quiet one look identical. The host counts what it dropped and
+    // the row states the number.
+    // ---------------------------------------------------------------------------
+    const truncated = page.locator(`[data-chat-call-id="${TRUNCATED_CALL}"]`)
+    await expect(truncated, 'the fixture never rendered the truncated card').toBeAttached({ timeout: 60_000 })
+    await revealCard(truncated)
+    await truncated.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
+    await revealCard(truncated)
+    await expect(
+      truncated.locator('[data-truncated="true"]'),
+      'a truncated step never stated what it dropped',
+    ).toHaveCount(1, { timeout: 60_000 })
+    const truncation = await truncated.evaluate((node) => ({
+      note: node.querySelector('[data-truncated="true"]')?.textContent ?? null,
+      kept: node.querySelector('[data-output="true"]')?.textContent?.length ?? -1,
+      notes: node.querySelectorAll('[data-truncated="true"]').length,
+    }))
+    console.log(`[e2e] truncation ${JSON.stringify(truncation)}`)
+    // The count is a REAL number, not a token ellipsis: the step prints ~40k characters
+    // into a budget of 8192, so thousands are missing.
+    const dropped = Number(/(\d+)/u.exec(truncation.note ?? '')?.[1] ?? '0')
+    expect(dropped, `the truncation note carries no character count: ${String(truncation.note)}`).toBeGreaterThan(1_000)
+    expect(truncation.note, 'the note does not begin at the cut').toMatch(/^…/u)
+    // Only the one step claims it, and what was KEPT fits the budget.
+    expect(truncation.notes, 'more than one step claims to be truncated').toBe(1)
+    expect(truncation.kept, 'the kept output is not inside the 8192-character budget').toBeLessThan(8_200)
+    // A card whose steps fit says nothing: the note is not decoration.
+    expect(
+      await live.locator('[data-truncated="true"]').count(),
+      'a card of complete steps carries a truncation note',
+    ).toBe(0)
   })
 })
 
@@ -1131,6 +1172,12 @@ test.describe('the shell_progress card in a real shell', () => {
  * @param browser - the browser fixture.
  * @param url - the booted host's URL (one per language; see the figure block).
  * @param sessionId - the fixture session to open; each context has its own storage.
+ * @param locale - the browser locale, which must AGREE with that host's stored
+ *   `locale.preference`. The two are different inputs and either can decide the page
+ *   language: the client starts from the browser's and replaces it with the host's once
+ *   the plugin activates, and which happens first is not guaranteed — a zh host shot from
+ *   an `en-US` context produced an English title on one run and a Chinese one on the
+ *   next. Setting both removes the race instead of betting on one side of it.
  * @param callId - the live call whose card is photographed.
  * @param path - where the PNG goes.
  * @param titleText - the title text to WAIT for before shooting: the card's title is the
@@ -1143,11 +1190,12 @@ async function captureFigure(
   browser: import('@playwright/test').Browser,
   url: string,
   sessionId: string,
+  locale: string,
   callId: string,
   path: string,
   titleText: string,
 ): Promise<{ readonly title: string; readonly width: number }> {
-  const context = await browser.newContext({ viewport: { width: README_FIGURE_WIDTH, height: 900 } })
+  const context = await browser.newContext({ locale, viewport: { width: README_FIGURE_WIDTH, height: 900 } })
   try {
     const page = await context.newPage()
     await page.addInitScript((id) => {

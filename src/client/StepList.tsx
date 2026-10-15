@@ -33,6 +33,11 @@ export interface StepListLabels {
   readonly stepLabel: (row: StepRow, total: number) => string
   /** Label of a step's output block. */
   readonly outputLabel: string
+  /**
+   * Says what a truncated output cost: the count the per-step budget discarded.
+   * Rendered AT the cut, under the output it belongs to.
+   */
+  readonly truncated: (chars: number) => string
   /** Label of the output produced before the first step. */
   readonly preambleLabel: string
   /** Shown when a step produced nothing. */
@@ -125,6 +130,15 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, onHover, la
        */}
       {row.output.trim() === '' ? null : (
         <pre className={styles.output} data-output="true" aria-label={labels.outputLabel}>{row.output}</pre>
+      )}
+      {/*
+       * The cut, stated AT the cut. The host's per-step budget drops whole lines once
+       * the step's output passes `maxStepOutputChars`, and the kept text alone cannot
+       * say whether it is everything the step printed: a truncated step and a quiet one
+       * look identical. This is the only place that difference is visible.
+       */}
+      {row.droppedChars === 0 ? null : (
+        <p className={styles.truncated} data-truncated="true">{labels.truncated(row.droppedChars)}</p>
       )}
     </div>
   )

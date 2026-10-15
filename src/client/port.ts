@@ -47,13 +47,18 @@ export function emptySnapshot(): LiveSnapshot {
 function stepOf(value: unknown): StepProgress | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
-  const { line, text, output, startedAt, endedAt } = record
+  const { line, text, output, startedAt, endedAt, droppedChars } = record
   if (typeof line !== 'number' || !Number.isFinite(line)) return undefined
   if (typeof text !== 'string' || typeof output !== 'string') return undefined
   return {
     line,
     text,
     output,
+    // A record persisted before this field existed has none, which reads as "nothing
+    // was dropped" — the same thing an explicit zero means.
+    ...typeof droppedChars === 'number' && Number.isFinite(droppedChars) && droppedChars > 0
+      ? { droppedChars }
+      : {},
     startedAt: typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : null,
     endedAt: typeof endedAt === 'number' && Number.isFinite(endedAt) ? endedAt : null,
   }

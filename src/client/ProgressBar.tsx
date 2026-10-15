@@ -45,6 +45,11 @@ import styles from './ProgressBar.module.css'
 export interface ProgressBarLabels {
   /** Accessible name of one segment. */
   readonly stepLabel: (row: StepRow, total: number) => string
+  /**
+   * Says what a truncated output cost: the characters the per-step budget dropped.
+   * The card states it under the output it belongs to, exactly as the step list does.
+   */
+  readonly truncated: (chars: number) => string
 }
 
 /** Lines of a step's output a hover card shows before it says how many it hid. */
@@ -103,9 +108,15 @@ export function cardOutput(output: string): string | null {
  * @param row - the step whose segment this card belongs to.
  * @param duration - the step's own clock, or null while it is still pending.
  * @param toolName - the tool that ran the command; it names the highlighting grammar.
+ * @param truncated - states the characters the per-step budget dropped, when it did.
  * @returns the card's content.
  */
-export function stepCard(row: StepRow, duration: string | null, toolName: string): ReactNode {
+export function stepCard(
+  row: StepRow,
+  duration: string | null,
+  toolName: string,
+  truncated: (chars: number) => string,
+): ReactNode {
   const output = cardOutput(row.output)
   return (
     <div className={styles.card} data-step-card="true">
@@ -118,6 +129,15 @@ export function stepCard(row: StepRow, duration: string | null, toolName: string
           <hr className={styles.cardRule} data-card-divider="true" />
           <pre className={styles.cardOutput} data-card-output="true">{output}</pre>
         </>
+      )}
+      {/*
+       * The step's output was TRUNCATED by the host's per-step budget, which is a
+       * different fact from the clamp above (`cardOutput` shortens for display and
+       * says so in lines). A card that showed the kept text alone would quietly claim
+       * the step printed exactly this much.
+       */}
+      {row.droppedChars === 0 ? null : (
+        <p className={styles.cardTruncated} data-card-truncated="true">{truncated(row.droppedChars)}</p>
       )}
     </div>
   )
@@ -284,7 +304,7 @@ export function ProgressBar({ view, toolName, labels, onHoverStep, linkedStep }:
                   onBlur={() => { onHoverStep?.(null) }}
                 />
               )}
-              content={stepCard(row, durationOf(row), toolName)}
+              content={stepCard(row, durationOf(row), toolName, labels.truncated)}
               openDelayMs={120}
               variant="preview"
               widthAnchorRef={trackRef}

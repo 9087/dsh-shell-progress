@@ -103,6 +103,12 @@ export interface StepRow {
   readonly text: string
   /** Output attributed to this step. */
   readonly output: string
+  /**
+   * Characters the host's per-step budget dropped from that output; 0 when the step's
+   * output is complete. The row states this at the cut, so a truncated step cannot be
+   * mistaken for a step that printed little.
+   */
+  readonly droppedChars: number
   /** What the step is doing now. */
   readonly phase: StepPhase
   /** Milliseconds it took, or has been running for. */
@@ -142,6 +148,7 @@ interface Row {
   readonly line: number
   readonly text: string
   readonly output: string
+  readonly droppedChars: number
   readonly startedAt: number | null
   readonly endedAt: number | null
 }
@@ -187,6 +194,7 @@ function assembleRows(
       line: row.line,
       text: row.text,
       output: row.output,
+      droppedChars: row.droppedChars,
       phase,
       durationMs,
       tone: durationTone(durationMs),
@@ -227,6 +235,7 @@ export function viewFromSettled(
     line: step.line,
     text: step.text,
     output: step.output,
+    droppedChars: step.droppedChars ?? 0,
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
@@ -278,6 +287,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
     line: step.line,
     text: step.text,
     output: step.output,
+    droppedChars: step.droppedChars ?? 0,
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
@@ -391,6 +401,12 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
       line: step.line,
       text: step.text,
       output: step.output,
+      // Narrowed like everything else here, but NOT dropped: the card states this at the
+      // cut, and a narrowing that quietly discarded it would leave every reloaded session
+      // claiming a truncated step was complete.
+      ...typeof step.droppedChars === 'number' && Number.isFinite(step.droppedChars) && step.droppedChars > 0
+        ? { droppedChars: step.droppedChars }
+        : {},
       startedAt: typeof step.startedAt === 'number' ? step.startedAt : null,
       endedAt: typeof step.endedAt === 'number' ? step.endedAt : null,
     })
