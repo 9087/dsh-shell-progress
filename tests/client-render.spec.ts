@@ -172,6 +172,70 @@ function singleStepBlock(): Record<string, unknown> {
   }
 }
 
+/**
+ * The four-step settled call with each step's output REPLACED.
+ *
+ * The tooltip has three edges the four uniform fixture outputs never reach: output
+ * that is empty, output that is far too long, and output whose characters happen to
+ * look like markup.
+ * @param outputs - one output per step, in order.
+ * @returns the call block.
+ */
+function withOutputs(outputs: readonly string[]): Record<string, unknown> {
+  const block = settledBlock()
+  const meta = block.meta as { steps: { output: string }[] }
+  meta.steps.forEach((step, index) => { step.output = outputs[index] ?? '' })
+  return block
+}
+
+/** The bubble's divider glyph, as the shipped bundle draws it. */
+const RULE_CHAR = '\u2500'
+
+/**
+ * A run of divider glyphs, as it appears on the tooltip's own line.
+ * @param count - how many glyphs.
+ * @returns the line.
+ */
+function rule(count: number): string {
+  return RULE_CHAR.repeat(count)
+}
+
+/**
+ * The first tooltip's title out of a rendered card — one segment's bubble.
+ * @param html - the rendered card.
+ * @returns the title text, or an empty string when no tooltip rendered.
+ */
+function firstTitle(html: string): string {
+  return [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')[0] ?? ''
+}
+
+/**
+ * A settled call whose steps are exactly the given command and output, so the bubble's
+ * divider can be measured against text this file chooses instead of the four-step
+ * fixture's fixed commands. TWO steps, because a one-step call draws no bar at all
+ * (`barShape` returns 'none' at `total <= 1`) and therefore no segment tooltip.
+ * @param command - the step's command text.
+ * @param output - the output that command produced.
+ * @returns the call block.
+ */
+function twoSteps(command: string, output: string): Record<string, unknown> {
+  return {
+    ...settledBlock(),
+    call: { name: 'shell_progress', argsRaw: JSON.stringify({ command: `${command}\n${command}` }) },
+    meta: {
+      v: 1,
+      instrumented: false,
+      refused: false,
+      partial: false,
+      preamble: '',
+      steps: [
+        { line: 1, text: command, output, startedAt: 0, endedAt: 0 },
+        { line: 2, text: command, output, startedAt: 0, endedAt: 0 },
+      ],
+    },
+  }
+}
+
 /** Register the card out of the bundle and render it for one settled call. */
 async function renderCard(
   block: Record<string, unknown> = settledBlock(),
@@ -211,8 +275,24 @@ async function renderCard(
   return renderToStaticMarkup(createElement(Component as never, props as never))
 }
 
-describe('the built client bundle, rendered', () => {
-  it('injects one stylesheet per CSS module when the factory runs', async () => {
+/** The stylesheets the bundle injects, as one string. */
+async function injectedCss(): Promise<string> {
+  const entry = await loadBundle()
+  entry.factory(loaderRequire)
+  return Array.from(document.querySelectorAll('style[data-plugin="dsh-shell-progress"]'))
+    .map((node) => node.textContent ?? '')
+    .join('\n')
+}
+
+/** How many times a shared name is declared (`--name:`) and consumed (`var(--name`). */
+function paletteUse(css: string, name: string): { readonly declared: number, readonly consumed: number } {
+  return {
+    declared: (css.match(new RegExp(`${name}:`, 'g')) ?? []).length,
+    consumed: (css.match(new RegExp(`var\\(${name}[,)]`, 'g')) ?? []).length,
+  }
+}
+
+describe('the built client bundle, rendered', () => {  it('injects one stylesheet per CSS module when the factory runs', async () => {
     const entry = await loadBundle()
     // The factory is what evaluates the modules, and the style tags are
     // injected as a module side effect — so this call is the subject.
@@ -228,18 +308,212 @@ describe('the built client bundle, rendered', () => {
     expect(css).toContain('--dsw-alias-state-success-primary')
   })
 
-  it('draws one segment per step, each with an accessible name and its command', async () => {
+  // The bar and the step list are two CSS modules, and the dot's colour has to BE
+  // the segment's colour — not a second copy of it. So the state palette is declared
+  // exactly once and read from both places. The counts are structural: one
+  // declaration, and at least two consumers, one of which is on each side.
+
+  it('declares the step-state palette once and reads it from both the bar and the dots', async () => {
+    const css = await injectedCss()
+    for (const state of ['pending', 'running', 'done', 'slow', 'error']) {
+      const { declared, consumed } = paletteUse(css, `--step-state-${state}`)
+      expect(declared, `--step-state-${state} is declared ${String(declared)} times, not once`).toBe(1)
+      expect(
+        consumed,
+        `--step-state-${state} is read by ${String(consumed)} rules — the bar segment and the dot must both read it`,
+      ).toBeGreaterThanOrEqual(2)
+    }
+    // The two translucencies are shared the same way, so pending and running read as
+    // the same material in the list as they do on the bar.
+    for (const state of ['pending', 'running']) {
+      const { declared, consumed } = paletteUse(css, `--step-alpha-${state}`)
+      expect(declared, `--step-alpha-${state} is declared ${String(declared)} times, not once`).toBe(1)
+      expect(consumed, `--step-alpha-${state} is read by ${String(consumed)} rules`).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  // The removal pins. The `>` marker, the border-drawn caret and its rotation are
+  // gone from the shipped stylesheet; the DOM half of the same claim is asserted
+  // against a real browser in `e2e/card.spec.ts`.
+
+  it('ships no running arrow, no caret triangle and no open-state rule', async () => {
+    const css = await injectedCss()
+    // A positive control, so a stylesheet that failed to load cannot pass the
+    // absence checks below by being empty.
+    expect(css).toContain('--step-marker:8px')
+    expect(css).not.toContain('-1.3em')
+    expect(css).not.toContain('border-left:5px solid currentColor')
+    expect(css).not.toContain('rotate(90deg)')
+  })
+
+  // The numbers these changes are about, pinned where they cannot drift: one right
+  // inset shared by the progress line and the step list, and an output that starts on
+  // the COMMAND TEXT's own column instead of behind an indent of its own.
+
+  it('shares one right inset and puts the output on the command text\'s own column', async () => {
+    const css = await injectedCss()
+    const inset = paletteUse(css, '--card-pad-right')
+    expect(inset.declared, 'the shared right inset is not declared exactly once').toBe(1)
+    expect(inset.consumed, 'the shared right inset is not used by BOTH rows').toBe(2)
+    expect(css).toContain('--card-pad-right:4px')
+    // The output's indent IS the command text's column — the marker, the gap after it
+    // and the headline's 1px, read from those names rather than repeated as a literal
+    // that could drift away from them.
+    const indent = paletteUse(css, '--step-output-indent')
+    expect(indent.declared, 'the output indent is not declared exactly once').toBe(1)
+    expect(indent.consumed, 'the output indent is not used by the output block').toBe(1)
+    expect(css).toContain('--step-output-indent:calc(var(--step-marker) + var(--step-gap) + 1px)')
+    expect(css, 'the output still carries the old deeper 24px indent').not.toContain('--step-output-indent:24px')
+    // The gap is what makes that column the command's: declared once, read by the
+    // headline that lays the marker out and by the indent built out of it.
+    const gap = paletteUse(css, '--step-gap')
+    expect(gap.declared, 'the marker gap is not declared exactly once').toBe(1)
+    expect(gap.consumed, 'the marker gap is not read by the headline AND by the output indent').toBe(2)
+  })
+
+  // The three shapes this change is about, pinned in the SHIPPED stylesheet: a 4px
+  // round dot that grows on hover and does not move, no hover fill anywhere, and NO
+  // divider in the card body. The rendered halves of the same claims are measured in
+  // a real browser by `e2e/card.spec.ts`.
+
+  it('ships a smaller round dot that grows on hover, no hover fill and no card-body divider', async () => {
+    const css = await injectedCss()
+    const dot = paletteUse(css, '--step-dot')
+    expect(dot.declared, 'the dot size is not declared exactly once').toBe(1)
+    // Read twice on purpose: once for each axis of the circle.
+    expect(dot.consumed, 'the dot size is not read by both of the dot\'s axes').toBe(2)
+    // 4px, down from 6px — and 4 × 1.25 is a whole device pixel where 6 × 1.25 is
+    // not, which is the whole reason for the size.
+    expect(css).toContain('--step-dot:4px')
+    expect(css, 'the old 6×6 dot is still in the stylesheet').not.toContain('width:6px;height:6px')
+    // Round by construction at any size: the radius, no border to add a second box,
+    // and one aspect ratio for the two axes.
+    const dotRule = /(?:^|\})\.([A-Za-z0-9_-]*_dot)\{([^}]*)\}/.exec(css)
+    expect(dotRule, 'the dot has no rule of its own').not.toBeNull()
+    const dotBody = dotRule?.[2] ?? ''
+    expect(dotBody, 'the dot is not a circle').toContain('border-radius:50%')
+    expect(dotBody, 'the dot can still gain a border box').toContain('border:0')
+    expect(dotBody, 'the dot\'s two axes can disagree').toContain('aspect-ratio:1')
+    // It grows on hover, as a TRANSFORM about its own centre: nothing here is layout,
+    // so neither the marker column nor one character of the command can move.
+    expect(css, 'the dot does not grow on hover').toContain('transform:scale(1.5)')
+    expect(dotBody, 'a transform sits in the dot\'s resting state, not only on hover').not.toContain('transform:')
+    // The hover FILL is gone — in both themes, which means the theme's interactive
+    // fill token is gone from this plugin's stylesheets entirely.
+    expect(css, 'the row still paints the theme\'s hover fill').not.toContain('--dsw-alias-interactive-bg-hover')
+    // NO divider in the card body. The hairline that used to sit above the output is
+    // gone — the tooltip carries that divider instead, pinned in the bubble tests
+    // below — and the design system's border step is not referenced anywhere, so the
+    // removal is a removal rather than a rule that merely stopped painting.
+    const outputRule = /(?:^|\})\.([A-Za-z0-9_-]*_output)\{([^}]*)\}/.exec(css)
+    expect(outputRule, 'the output has no rule of its own').not.toBeNull()
+    const outputBody = outputRule?.[2] ?? ''
+    expect(outputBody, 'the card body still draws a divider above the output').not.toContain('border-top')
+    expect(css, 'the divider token is still in the stylesheet').not.toContain('--dsw-alias-border-l3')
+    expect(outputBody, 'the output is not dimmer than the command').toContain('color:var(--dsw-alias-label-caption')
+    expect(outputBody, 'the output still wears the command line\'s own colour').not.toContain('color:var(--dsw-alias-label-primary')
+    // The `:empty` rule that existed for the divider is gone with it, and the spacing
+    // that keeps an empty output out of the way now hangs on the block that HAS
+    // something to show: dropping the rule must not re-open a blank gap under a step
+    // that printed nothing.
+    expect(css, 'the dropped `:empty` rule is still in the stylesheet').not.toMatch(/:empty\{/u)
+    expect(css, 'an empty output would take up blank room again').toMatch(/_output[A-Za-z0-9_-]*:not\(:empty\)\{/u)
+  })
+
+  it('draws one segment per step, each with an accessible name, its command and its output', async () => {
     const html = await renderCard()
     expect((html.match(/data-phase="done"/g) ?? [])).toHaveLength(4)
     expect(html).toContain('role="progressbar"')
     expect(html).toContain('aria-valuemax="4"')
     expect(html).toContain('aria-valuenow="4"')
-    // Hovering a segment shows the STEP'S OWN COMMAND AND ITS TIME — the same two
-    // things the expanded row shows. Its source line number is deliberately NOT in
-    // the bubble: the card points at the matching row instead.
+    // Hovering a segment shows the STEP'S OWN COMMAND, ITS TIME AND ITS OUTPUT — the
+    // same things the expanded row shows, one above the other. Its source line number
+    // is deliberately NOT in the bubble: the card points at the matching row instead.
     expect(html).toContain('title=')
     expect(html).toContain('[1/4] fetch')
     expect(html).toContain('[0s]')
+  })
+
+  // The bubble's new half. The shell's own bubble is `white-space: pre-line`, so a
+  // `\n` in the label is the line break the reader sees — and the label is a STRING
+  // rendered as a text child, so nothing in the output can become markup, and no
+  // DIVIDER can be an element either. The stub in this file renders that label into a
+  // `title` attribute, which is the same string.
+
+  it('puts the step\'s own output in its segment tooltip, under a divider', async () => {
+    const html = await renderCard()
+    const titles = [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')
+    expect(titles, 'the bar did not render one tooltip per segment').toHaveLength(4)
+    // Command line (with the clock) first, then the divider, then the step's output.
+    // 31 glyphs is the widest line here — the command with its clock — because the
+    // shell's `Tooltip` takes a string and can carry no element that could draw a rule.
+    expect(titles[0], 'the first step\'s tooltip is not its command, a divider and its output').toBe(
+      `Write-Output &quot;[1/4] fetch&quot; [0s]\n${rule(31)}\n[1/4] fetch`,
+    )
+    // The third step's command is one character shorter (`test`, not `fetch`), so its
+    // rule is one glyph shorter: the divider follows the text it separates.
+    expect(titles[2], 'the third step\'s tooltip is not its own command, a divider and its output').toBe(
+      `Write-Output &quot;[3/4] test&quot; [0s]\n${rule(30)}\n[3/4] test`,
+    )
+    // The divider is its OWN line between the two, not a prefix on the output: line 2
+    // is nothing but box-drawing glyphs, and the output follows on line 3. The widths
+    // are the widest line in each bubble — the command with its clock, 31 characters
+    // for `fetch`/`build` and 30 for `test`/`pack`.
+    const steps = [
+      { output: '[1/4] fetch', divider: 31 },
+      { output: '[2/4] build', divider: 31 },
+      { output: '[3/4] test', divider: 30 },
+      { output: '[4/4] pack', divider: 30 },
+    ]
+    titles.forEach((title, index) => {
+      const lines = title.split('\n')
+      expect(lines[1], `segment ${String(index + 1)} has no divider line`).toMatch(/^\u2500+$/u)
+      expect(lines[1]?.length, `segment ${String(index + 1)}'s divider is not sized to the widest line`).toBe(steps[index]?.divider)
+      expect(lines[2], `segment ${String(index + 1)}'s output is not under the divider`).toBe(steps[index]?.output)
+    })
+  })
+
+  it('sizes the tooltip divider to the widest line, with a floor and a ceiling', async () => {
+    // A one-character command: the clock still rides on the line, and the rule stops at
+    // its floor rather than shrinking to a stray dash.
+    const short = await renderCard(twoSteps('x', 'y'))
+    expect(firstTitle(short).split('\n')[1], 'the divider shrank below its floor').toBe(rule(8))
+    // A command far past the ceiling: the rule is capped, so a long line cannot turn
+    // the bubble into a slab.
+    const long = await renderCard(twoSteps('z'.repeat(300), 'w'))
+    expect(firstTitle(long).split('\n')[1], 'the divider grew past its ceiling').toBe(rule(48))
+  })
+
+  it('keeps empty, long and markup-bearing output safe in the tooltip', async () => {
+    const html = await renderCard(withOutputs([
+      '<script>alert("x")</script> & done',
+      '',
+      Array.from({ length: 12 }, (_, index) => `line ${String(index + 1)}`).join('\n'),
+      'x'.repeat(600),
+    ]))
+    const titles = [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')
+    expect(titles).toHaveLength(4)
+    // Markup characters are characters of a string child: React escapes them, so the
+    // output is READ as text and no element is created out of it.
+    expect(titles[0], 'the output\'s markup characters were not escaped').toContain(
+      '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; done',
+    )
+    expect(html, 'output was rendered as markup').not.toContain('<script>')
+    // Empty output adds NO second line — not a blank one — and so no divider either:
+    // a divider with nothing under it would be a rule across nothing.
+    expect(titles[1], 'an empty output left a dangling line in the bubble').toBe(
+      'Write-Output &quot;[2/4] build&quot; [0s]',
+    )
+    // Long output is clamped by LINE, and says how much it hid: the command line, the
+    // divider, six output lines, then the count line — so line nine is never silently
+    // missing. (The divider is the one line this change added inside the bubble.)
+    expect(titles[2]?.split('\n'), 'the tooltip did not clamp a 12-line output to six lines plus a count').toHaveLength(9)
+    expect(titles[2]?.split('\n')[1], 'the clamped bubble lost its divider').toBe(rule(30))
+    expect(titles[2], 'the tooltip does not say how many lines it hid').toContain('… 6 more lines')
+    // ...and one enormous single line is clamped by CHARACTER, so it cannot become a
+    // slab taller than the viewport.
+    expect(titles[3]?.endsWith('…'), 'a 600-character output line was not clamped').toBe(true)
+    expect((titles[3] ?? '').length, 'the clamped tooltip is still unbounded').toBeLessThan(500)
   })
 
   it('puts a real hashed class on the track, so the layout is not unstyled', async () => {
@@ -249,6 +523,36 @@ describe('the built client bundle, rendered', () => {
     const classes = track?.[1] ?? ''
     expect(classes.length).toBeGreaterThan(4)
     expect(classes).not.toBe('undefined')
+  })
+
+  // The count's SIDE is a property of the markup, not of a stylesheet, so it is
+  // pinned here: the count is the last element of the progress line, i.e. it comes
+  // AFTER the bar in DOM order. That is what makes it the outermost element — and
+  // therefore the right edge the step rows have to meet, which `e2e/card.spec.ts`
+  // measures against the row boxes. Swapping the two back would put the count on the
+  // left and hand the boundary back to the bar.
+
+  it('renders the count AFTER the bar, so the count is the outermost element', async () => {
+    const html = await renderCard()
+    // The progress line's opening tag is the boundary: everything from there on is
+    // the line's own content, and the line is the last thing this card renders at its
+    // own level except the (closed) step list and the notice, both of which come
+    // after the count. A `[\s\S]*?</div></div>` capture is deliberately NOT used —
+    // the bar nests divs of its own, so the first `</div></div>` closes the bar and
+    // the capture would end before the count and pass for the wrong reason.
+    const lineAt = html.indexOf('data-progress-line="true"')
+    expect(lineAt, 'the progress line has no markup of its own to read').toBeGreaterThan(-1)
+    const fromLine = html.slice(lineAt)
+    const barAt = fromLine.indexOf('role="progressbar"')
+    const counterAt = fromLine.search(/<span class="[^"]*" data-counter="true">/)
+    expect(barAt, 'the progress line carries no bar').toBeGreaterThan(-1)
+    expect(counterAt, 'the progress line carries no count').toBeGreaterThan(-1)
+    expect(barAt, 'the count leads the bar, so the count is not the outermost element').toBeLessThan(counterAt)
+    // ...and the count is the element that CLOSES the line: nothing after it in this
+    // container. Read on the same slice, so it is the count's position that is pinned
+    // rather than a later element's.
+    const afterCounter = fromLine.slice(counterAt)
+    expect(afterCounter, 'an element still follows the count inside the progress line').not.toContain('data-phase=')
   })
 
   // The rendered proof for the refusal signal. The notice has to hang on the flag,
@@ -327,9 +631,11 @@ describe('the built client bundle, rendered', () => {
       steps: [],
     })
     // NO bar (so no segments) and no counter. The step ROWS are not in this
-    // markup either, for a second reason: the tree is collapsed by default, and
-    // a static render never opens it — which is why the row-level pin lives in
-    // `./model.spec.ts`, where `view.steps` is read directly.
+    // markup either, for a second reason: the CARD's own disclosure is closed by
+    // default and a static render never opens it — which is why the row-level pin
+    // lives in `./model.spec.ts`, where `view.steps` is read directly, and why the
+    // always-rendered output block is measured in a real browser by
+    // `e2e/card.spec.ts`.
     expect(before).not.toContain('role="progressbar"')
     expect((before.match(/data-phase=/g) ?? [])).toHaveLength(0)
     expect(before).not.toContain('row.counter')

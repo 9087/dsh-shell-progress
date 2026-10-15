@@ -1,6 +1,7 @@
-/* A step is a tree node: its command line with the time beside it, and that step's
- * output as a CHILD — indented under the command, closed until asked for. Nothing
- * occupies a column to the left of either line. */
+/* A step is one row: the command line with the time beside it, and that step's
+ * output underneath — ALWAYS, with nothing to open. Nothing is collapsible here,
+ * so nothing in this file expresses collapsed/expanded. The marker column at the
+ * left holds a DOT whose colour is the step's state. */
 .list {
   display: flex;
   flex-direction: column;
@@ -11,45 +12,41 @@
    * elements below have to repeat the declaration (see the note on `.code`). */
   --step-size: 10px;
   --step-leading: 15px;
-  /* One marker column, shared by the toggle, its spacer and the child indent, so the
-   * three line up by construction instead of by matching numbers.
+  /* One marker column, shared by the dot and the output indent, so the two line up
+   * by construction instead of by matching numbers.
    *
-   * In PX, never `ch`: the toggle is a `<button>`, a button does NOT inherit the page
-   * font, and `ch` resolves against the element's OWN font — so `1.2ch` came out one
-   * width on the button and another on the spacer `<span>`, and a command's left edge
-   * moved depending on whether its node had a caret to show. */
+   * In PX, never `ch`: the marker is a flex box, and `ch` resolves against the
+   * element's OWN font — the marker and the output used to come out different
+   * widths for exactly that reason. */
   --step-marker: 8px;
+  /* The gap between the marker column and the command text, named once because the
+   * output's own indent is built out of it (see `--step-output-indent`). */
+  --step-gap: 0.6em;
+  /* The state dot: 4px, down from 6px. 4px is the size that stays a WHOLE number of
+   * device pixels at 1x, 1.25x, 1.5x and 2x (4 × 1.25 = 5), so the circle's edges
+   * rasterise symmetrically instead of landing on half a device pixel — which is
+   * what a 6px dot does at 125% Windows scaling (6 × 1.25 = 7.5) and what makes a
+   * round dot read as a slightly clipped square. */
+  --step-dot: 4px;
+  /* The command text's OWN column: 8px marker + 6px gap + the headline's 1px
+   * padding, read from the names above rather than repeated as a literal. The
+   * output therefore starts exactly under the character the command starts at —
+   * no second indent of its own, and no two numbers that merely look close. */
+  --step-output-indent: calc(var(--step-marker) + var(--step-gap) + 1px);
   font: var(--dsw-font-markdown-code-block-small);
   font-size: var(--step-size);
   line-height: var(--step-leading);
 }
 
-/* No padding and no background of its own: the node is a container, and the hover
+/* No padding and no background of its own: the row is a container, and the hover
  * fill belongs to the command line inside it (see `.headline`). */
 .row {
-  position: relative; /* the running marker is positioned against this row */
   display: flex;
   flex-direction: column;
 }
 
-/* `>` marks WHERE THE COMMAND IS, not where the pointer is: it rides the step that is
- * executing right now, so the live position is readable without hovering — the same
- * glyph the native command row uses for its own prompt. It sits inside `.steps`'s own
- * padding, so it consumes NO width, and it is in the DOM whether or not it is showing,
- * so revealing it moves nothing. */
-.arrow {
-  position: absolute;
-  left: -1.3em;
-  color: var(--dsw-alias-label-primary, currentColor);
-  opacity: 0;
-}
-
-.row[data-phase='running'] .arrow {
-  opacity: 1;
-}
-
-/* The command line: marker, command (with its clock inside it) — and the only thing a
- * hover highlights.
+/* The command line: marker, command (with its clock inside it) — and the only thing
+ * a hover highlights.
  *
  * `flex-start`, not `baseline`: the clock now lives INSIDE the command's own text flow,
  * so there is nothing left to baseline-align, and a baseline-aligned multi-line block
@@ -58,79 +55,112 @@
 .headline {
   display: flex;
   align-items: flex-start;
-  gap: 0.6em;
+  gap: var(--step-gap, 0.6em);
   min-width: 0;
-  /* The hover fill needs a hair of room around the glyphs; `.steps` hands this 1px
-   * back on the left, so the command text keeps its column. */
+  /* 1px of room on each side, and `.steps` hands the left one back, so the command
+   * text keeps its column. `--step-output-indent` reads this same 1px, which is how
+   * the output lines up with the text rather than with the row's box. */
   padding: 0 1px;
-  border-radius: 4px;
 }
 
-/* Only a line that has something to open is clickable, so only it shows a pointer. */
-.row[data-toggleable='true'] .headline {
-  cursor: pointer;
-}
+/* NO hover fill, in EITHER theme. This element used to paint
+ * `--dsw-alias-interactive-bg-hover` while its row was hovered or linked, and that
+ * rule is gone: a background is a box drawn around text the pointer may not be on,
+ * and the two cues that DO answer the pointer are kept — the step's dot grows (see
+ * `.dot`) and the bar's matching segment lifts (see `ProgressBar.module.css`), both
+ * of which say "this step" without painting a slab over the line. */
 
-/* Hover answers "which line is this segment?": the theme's own interactive fill, on the
- * command line only — with a child open, covering the whole node would highlight
- * output the pointer is nowhere near. */
-.row[data-hovered='true'] .headline {
-  background-color: var(--dsw-alias-interactive-bg-hover, transparent);
-}
-
-/* The tree marker. A `<button>`, so it is reachable by keyboard and carries
- * `aria-expanded`.
+/* The marker column: exactly ONE line box tall, so the dot sits beside the FIRST
+ * line of the command. A marker centred on the whole headline would drift down a
+ * wrapped command, sitting next to the third line of text rather than next to the
+ * line it marks.
  *
- * `height: var(--step-leading)` is ONE line box, and the triangle is centred inside it:
- * that puts the caret beside the FIRST line of the command. A marker centred on the
- * whole headline drifts down a wrapped command, sitting next to the third line of text
- * rather than next to the line it opens. */
-.toggle {
+ * This is the same 8px × 15px box, centred the same way, that the disclosure
+ * triangle occupied: the dot is in the triangle's coordinates by construction. */
+.marker {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
   width: var(--step-marker);
   height: var(--step-leading);
+}
+
+/* The state dot. Its COLOUR is not decided here: it reads the `--step-state-*`
+ * names the bar's segments read (declared once on the card in `Row.module.css`),
+ * so a dot and the segment that stands for the same step cannot drift apart. The
+ * rules below mirror the bar's phase for phase and tone for tone — the two
+ * translucencies included, so pending and running read as the same material in
+ * both places. A dot is round and static: the running step is marked by its
+ * colour and by the bar, not by a glyph or a pulse.
+ *
+ * ROUND BY CONSTRUCTION, at 4px (see `--step-dot`): no border and no padding, so
+ * there is no second box for the corner radius to have to cover; `border-box`, so
+ * a border added later could not grow the box past the radius; and `aspect-ratio`,
+ * so the two axes cannot disagree. `transform-origin` is the default centre, which
+ * is what lets the hover scale below grow the dot in place. */
+.dot {
+  width: var(--step-dot, 4px);
+  height: var(--step-dot, 4px);
+  box-sizing: border-box;
+  aspect-ratio: 1 / 1;
   padding: 0;
   border: 0;
-  background: none;
-  color: var(--dsw-alias-label-secondary, inherit);
-  cursor: pointer;
+  border-radius: 50%;
+  background-color: var(--step-state-pending, currentColor);
+  transition: transform 120ms ease-out;
 }
 
-/* The disclosure triangle, DRAWN rather than typed. A `+` at this size is two thin
- * strokes in a mostly empty cell, and no monospace face here carries `▶`/`▼` at a
- * dependable width and baseline — the browser would fall back to another font and the
- * marker would drift. Borders give an exact size, an exact colour (`currentColor`, so
- * it follows the theme) and no font fallback at all. */
-.caret {
-  width: 0;
-  height: 0;
-  /* A right-pointing wedge: the left border is the visible triangle, the top and
-   * bottom borders are the transparent halves that give it its height. */
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  border-left: 5px solid currentColor;
+/* The dot grows when its step is pointed at — by the pointer anywhere on the row,
+ * and by the bar's segment through the same link that lifts that segment. A
+ * `scale()` and never a new width: a transform is applied when the dot is PAINTED,
+ * after layout, so the dot grows about its own centre and neither the marker
+ * column nor one character of the command line moves. `scale(1.5)` takes 4px to
+ * 6px, which still fits the 8px marker column it is centred in. */
+.row:hover .dot,
+.row[data-hovered='true'] .dot {
+  transform: scale(1.5);
 }
 
-/* Open: the same triangle, turned to point down. */
-.row[data-open='true'] .caret {
-  transform: rotate(90deg);
+.row[data-phase='pending'] .dot {
+  background-color: var(--step-state-pending, currentColor);
+  opacity: var(--step-alpha-pending, 0.5);
 }
 
-/* Keeps the column of a step that printed nothing, so every command starts alike — the
- * same box as the toggle in every dimension, which is what makes "with a caret" and
- * "without one" line up rather than merely look close. */
-.toggleSpacer {
-  flex: 0 0 auto;
-  width: var(--step-marker);
-  height: var(--step-leading);
+.row[data-phase='running'][data-tone='normal'] .dot {
+  background-color: var(--step-state-running, currentColor);
+  opacity: var(--step-alpha-running, 0.7);
+}
+
+.row[data-phase='running'][data-tone='slow'] .dot {
+  background-color: var(--step-state-slow, currentColor);
+  opacity: var(--step-alpha-running, 0.7);
+}
+
+.row[data-phase='running'][data-tone='overdue'] .dot {
+  background-color: var(--step-state-error, currentColor);
+  opacity: var(--step-alpha-running, 0.7);
+}
+
+.row[data-phase='done'][data-tone='normal'] .dot {
+  background-color: var(--step-state-done, currentColor);
+}
+
+.row[data-phase='done'][data-tone='slow'] .dot {
+  background-color: var(--step-state-slow, currentColor);
+}
+
+.row[data-phase='done'][data-tone='overdue'] .dot {
+  background-color: var(--step-state-error, currentColor);
+}
+
+.row[data-phase='failed'] .dot {
+  background-color: var(--step-state-error, currentColor);
 }
 
 /* A step that has not started is dimmer than the ones that have: the list is a record
  * of what RAN, and the lines still waiting are context rather than content. Applied to
- * the command line rather than the whole node so the running marker keeps its weight. */
+ * the command line rather than the whole node so the state dot keeps its weight. */
 .row[data-phase='pending'] .headline {
   opacity: 0.5;
 }
@@ -170,14 +200,38 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The child node: indented by exactly the marker column plus the headline's gap, so it
- * starts under the command rather than under the marker. No rule and no quote styling —
- * the indent is the whole statement that this belongs to the step above it. */
+/* The step's output: it starts on the command text's OWN column — no indent of its
+ * own, see `--step-output-indent` — and is DIMMER than the command line, because
+ * what a command printed is the record and the command is the thing being read.
+ *
+ * There is NO hairline between the command and its output in this BODY. A rule
+ * there was one box too many for a step that reads as one thought, and it was
+ * drawing the separator in the wrong place: the divider belongs inside the
+ * segment TOOLTIP, between the command and the output there (see `bubbleLabel`
+ * in `ProgressBar.tsx`). Here the two are still told apart — the output is
+ * dimmer, and the command wears the highlighted face — without a line.
+ *
+ * `margin` and `padding-top` sit on the NON-EMPTY block (below) rather than on
+ * the block itself, which is what keeps an output that printed nothing taking no
+ * room; an empty box with padding would otherwise add blank height under a step
+ * that produced nothing. This replaces the `:empty` rule that used to exist for
+ * that, and to suppress the hairline an empty output would have drawn. */
 .output {
-  margin: 0;
-  padding-left: calc(var(--step-marker) + 0.6em + 1px);
-  color: var(--dsw-alias-label-primary, inherit);
+  padding-left: var(--step-output-indent, 15px);
+  color: var(--dsw-alias-label-caption, inherit);
   white-space: pre-wrap;
+}
+
+/* The space between the command line and the output, on the block that has
+ * something to show. The JS guard in `StepList.tsx` is the real
+ * mechanism — a `\n`-only output is a text node, so `:not(:empty)` never matches
+ * it — and this rule is the second guard for a block that did reach the DOM with
+ * no text: it takes up no room, which is about there being nothing to show rather
+ * than about folding
+ * anything away. */
+.output:not(:empty) {
+  margin: 3px 0 0;
+  padding-top: 2px;
 }
 
 .preamble {
@@ -189,4 +243,12 @@
   margin: 0;
   color: var(--dsw-alias-label-caption, inherit);
   font-size: var(--dsh-content-font-size-secondary, 13px);
+}
+
+/* The dot still GROWS on hover with reduced motion on — that is the cue, not
+ * decoration — but it arrives in one step instead of animating there. */
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    transition: none;
+  }
 }

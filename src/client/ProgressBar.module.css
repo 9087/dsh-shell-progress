@@ -1,6 +1,9 @@
-/* The bar owns its whole width. Every level sets an explicit size so no parent
- * can collapse it: `flex-basis: 0` plus `min-width: 0`, nested inside a
- * shrink-to-fit wrapper, is what made this bar invisible once. */
+/* The bar's own element, and the only wrapper around the track: nothing between
+ * these two can collapse the width. It is a flex ITEM of the card's progress line
+ * now — the line is what lays the bar and the count out side by side — so it no
+ * longer ends in a right inset of its own, and the count beside it is what lands on
+ * the step rows' right edge. `align-items: center` and `line-height: 1` are what
+ * keep the 9px track from being stretched or nudged by whatever is next to it. */
 .bar {
   display: flex;
   align-items: center;
@@ -45,7 +48,11 @@
   padding: 0;
   border: 0;
   border-radius: 2px;
-  background-color: var(--dsw-alias-bg-skeleton, currentColor);
+  /* The state palette, not a colour: `--step-state-*` is declared once on the card
+   * (`Row.module.css`) and read by the step list's dots too, so a segment and the
+   * dot that stands for it can never be two different colours. The fallback is for
+   * a bar rendered outside a card, which is not a shape the plugin produces. */
+  background-color: var(--step-state-pending, currentColor);
   cursor: pointer;
 }
 
@@ -63,17 +70,21 @@
   height: 13px;
 }
 
+/* Every state below names the SHARED palette (declared once on the card in
+ * `Row.module.css`) rather than a token of its own: these are exactly the names
+ * the step list's dots read, which is what makes a dot's colour equal to its
+ * segment's colour for the same state. */
 .segment[data-phase='done'][data-tone='normal'] {
-  background-color: var(--dsw-alias-state-success-primary, currentColor);
+  background-color: var(--step-state-done, currentColor);
 }
 
 .segment[data-phase='done'][data-tone='slow'] {
-  background-color: var(--dsw-alias-state-warn-primary, currentColor);
+  background-color: var(--step-state-slow, currentColor);
 }
 
 .segment[data-phase='done'][data-tone='overdue'],
 .segment[data-phase='failed'] {
-  background-color: var(--dsw-alias-state-error-primary, currentColor);
+  background-color: var(--step-state-error, currentColor);
 }
 
 /* The running segment does NOT breathe. Opacity used to pulse between 0.45 and
@@ -81,16 +92,16 @@
  * already the moving part. The tone still escalates with time: `slow` past five
  * seconds, `overdue` past thirty. */
 .segment[data-phase='running'] {
-  background-color: var(--dsw-alias-state-success-tertiary, currentColor);
-  opacity: 0.7;
+  background-color: var(--step-state-running, currentColor);
+  opacity: var(--step-alpha-running, 0.7);
 }
 
 .segment[data-phase='running'][data-tone='slow'] {
-  background-color: var(--dsw-alias-state-warn-primary, currentColor);
+  background-color: var(--step-state-slow, currentColor);
 }
 
 .segment[data-phase='running'][data-tone='overdue'] {
-  background-color: var(--dsw-alias-state-error-primary, currentColor);
+  background-color: var(--step-state-error, currentColor);
 }
 
 /* "Not finished yet" is ONE translucency. The un-started steps and the running
@@ -100,8 +111,8 @@
  * amber and red looked solid while the pale fill looked see-through, and why the
  * running segment's transparency looked unstable. */
 .segment[data-phase='pending'] {
-  background-color: var(--dsw-alias-bg-skeleton, currentColor);
-  opacity: 0.5;
+  background-color: var(--step-state-pending, currentColor);
+  opacity: var(--step-alpha-pending, 0.5);
 }
 
 .solid {

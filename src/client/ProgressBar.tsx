@@ -18,9 +18,10 @@
  *
  * So the bar is now plain markup this file owns end to end: nothing between
  * `.bar` and `.track` that can collapse the width. Each segment keeps its own
- * accessible name and a native tooltip with its command line, and the expanded
- * step list is the full-width, always-readable view of the same information.
- * A richer hover card can come back once it is verified against a live shell.
+ * accessible name and a native tooltip with its command line AND the output that
+ * command produced (see `bubbleLabel`), and the expanded step list is the
+ * full-width, always-readable view of the same information. A richer hover card
+ * can come back once it is verified against a live shell.
  *
  * @module dsh-shell-progress/client/ProgressBar
  */
@@ -37,6 +38,95 @@ import styles from './ProgressBar.module.css'
 export interface ProgressBarLabels {
   /** Accessible name of one segment. */
   readonly stepLabel: (row: StepRow, total: number) => string
+}
+
+/** Lines of a step's output a hover bubble shows before it says how many it hid. */
+const BUBBLE_OUTPUT_LINES = 6
+
+/** Characters of a step's output a hover bubble shows, across all of its lines. */
+const BUBBLE_OUTPUT_CHARS = 400
+
+/**
+ * The glyph the bubble's command/output divider is drawn with: U+2500 BOX
+ * DRAWINGS LIGHT HORIZONTAL.
+ *
+ * A divider between the command and the output is asked for, and the shell's
+ * `Tooltip` cannot carry an element that would draw one. Its prop is
+ * `label: string | (() => string)` — quoted from `Tooltip.d.ts` in
+ * `@deepseek-ai/dsh-client-ui-primitives`, the platform module this file imports
+ * — and its bubble renders the resolved value as a text child of a `<span>`, so
+ * characters are the only markup a bubble can carry. A run of these glyphs is the
+ * one thing in that alphabet that reads as the card's own hairline.
+ *
+ * The same restriction is why the bubble is NOT syntax-highlighted: a token span
+ * is an element, and the prop takes none. The card body remains the one place a
+ * command is highlighted (see `./highlight.ts`).
+ */
+const RULE = '\u2500'
+
+/** Shortest rule, in glyphs: below this a run reads as a stray dash. */
+const RULE_MIN = 8
+
+/** Longest rule, in glyphs: past this the bubble stretches into a slab. */
+const RULE_MAX = 48
+
+/**
+ * The bubble's divider: a rule as long as the widest line it separates.
+ *
+ * The bubble is `width: max-content`, so the rule is read against the lines above
+ * and below it. Sizing it from the longest line — rather than as a constant — is
+ * what keeps a short command's rule from running past it and a long one's from
+ * stopping in the middle. A box-drawing glyph's advance is not exactly a
+ * proportional letter's, so this is not a pixel-equality promise; the real ratio
+ * is measured in `e2e/card.spec.ts`.
+ * @param lines - the lines the rule sits between.
+ * @returns one line of box-drawing glyphs.
+ */
+function divider(lines: readonly string[]): string {
+  const widest = lines.reduce((max, line) => Math.max(max, line.length), 0)
+  return RULE.repeat(Math.min(RULE_MAX, Math.max(RULE_MIN, widest)))
+}
+
+/**
+ * The hover bubble's text for one step: its command line with the clock, a
+ * divider, then the output that command produced.
+ *
+ * The bubble is the shell's `Tooltip`, whose bubble is `white-space: pre-line` with
+ * `overflow-wrap: break-word` — so a `\n` here is a real line break, and the label
+ * is a STRING rendered as a text child (React escapes it), never markup. Long,
+ * empty and markup-bearing output are therefore handled by construction rather than
+ * by hoping:
+ *
+ * - EMPTY (or blank, or a lone trailing newline) output adds nothing at all — no
+ *   line, and no divider either: the bubble is the command line and nothing else,
+ *   with no dangling blank line.
+ * - LONG output is clamped to `BUBBLE_OUTPUT_LINES` lines and
+ *   `BUBBLE_OUTPUT_CHARS` characters. A cut in the middle of the text ends it with
+ *   `…`; dropped lines add a final `… N more lines`, so what is NOT shown is
+ *   stated instead of silently missing. The expanded step list stays the full view.
+ * - MARKUP CHARACTERS — `<`, `>`, `&` — are ordinary characters of a string child,
+ *   so they render as themselves and cannot become elements.
+ * - The DIVIDER between the command and the output is a run of box-drawing glyphs
+ *   (see `RULE`), sized to the widest line shown. It is the one separator a string
+ *   can carry; the card body deliberately has none (see `StepList.module.css`).
+ * @param row - the step whose segment the bubble belongs to.
+ * @param duration - the step's own clock, or null while it is still pending.
+ * @returns the bubble's text.
+ */
+export function bubbleLabel(row: StepRow, duration: string | null): string {
+  const command = duration === null ? row.text : `${row.text} [${duration}]`
+  // CRLF comes from Windows shells; a trailing newline is the shell's line
+  // terminator rather than a line of output, and a leading one only indents the
+  // bubble's first line by nothing.
+  const output = row.output.replace(/\r\n?/gu, '\n').replace(/^\n+|\n+$/gu, '')
+  if (output === '') return command
+  const cut = output.length > BUBBLE_OUTPUT_CHARS
+  const lines = (cut ? output.slice(0, BUBBLE_OUTPUT_CHARS) : output).split('\n')
+  const shown = lines.slice(0, BUBBLE_OUTPUT_LINES)
+  const hidden = lines.length - shown.length
+  const body = cut ? `${shown.join('\n')}…` : shown.join('\n')
+  const more = hidden === 0 ? '' : `\n… ${String(hidden)} more line${hidden === 1 ? '' : 's'}`
+  return `${command}\n${divider([command, ...shown])}\n${body}${more}`
 }
 
 /**
@@ -131,12 +221,13 @@ export function ProgressBar({ view, labels, onHoverStep, linkedStep }: {
 
   // The bubble's text is a RESOLVER, evaluated when the bubble becomes visible, so
   // the clock inside it is the step's elapsed time AT THAT INSTANT — the same
-  // number the expanded list shows, without a second counter to keep in step.
+  // number the expanded list shows, without a second counter to keep in step. The
+  // step's output rides BELOW that first line (see `bubbleLabel`).
   const labelOf = (row: StepRow): string => {
     const duration = row.phase === 'pending'
       ? null
       : formatSeconds(row.phase === 'running' ? view.currentElapsedMs : row.durationMs)
-    return duration === null ? row.text : `${row.text} [${duration}]`
+    return bubbleLabel(row, duration)
   }
 
   return (
@@ -180,7 +271,11 @@ export function ProgressBar({ view, labels, onHoverStep, linkedStep }: {
                * `label` accepts a STRING OR A RESOLVER, and the resolver form is the
                * one that matters here: it is evaluated only while the bubble is
                * visible, so the `[2s]` it shows is the elapsed time at the moment of
-               * hovering rather than the value frozen at the last render.
+               * hovering rather than the value frozen at the last render. What it
+               * resolves to is `bubbleLabel`: that command line, a divider, then the
+               * output the step produced underneath it. A string is all the prop
+               * takes — see `RULE` — so the divider is a run of box-drawing glyphs
+               * and nothing in the bubble, the command included, is highlighted.
                */
               label={() => labelOf(row)}
               side="top"

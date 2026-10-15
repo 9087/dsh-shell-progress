@@ -177,14 +177,22 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
        * the call, and the shell renders the command line and the output.
        */}
       {view.total === 0 ? null : (
-        <div className={styles.progressLine}>
+        <div className={styles.progressLine} data-progress-line="true">
+          {/*
+           * The counter TRAILS the bar, and it is the outermost element of the group:
+           * bar first, count last, both centred on one line. The right edge the step
+           * rows have to meet is therefore the COUNTER's, and it is the counter's own
+           * box that ends on the shared `--card-pad-right`; the bar's right edge now
+           * legitimately stops short of the rows by the counter's width and the row's
+           * gap, which `e2e/card.spec.ts` measures rather than assumes.
+           */}
           <ProgressBar
             view={view}
             labels={barLabels}
             onHoverStep={setLinkedStep}
             linkedStep={linkedStep}
           />
-          <span className={styles.counter}>{t('row.counter', { done: view.done, total: view.total })}</span>
+          <span className={styles.counter} data-counter="true">{t('row.counter', { done: view.done, total: view.total })}</span>
         </div>
       )}
       {notice === undefined ? null : <p className={styles.notice}>{notice}</p>}

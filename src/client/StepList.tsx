@@ -1,21 +1,25 @@
 /**
- * The step list, as a tree: one node per top-level step, with that step's output as a
- * CHILD node.
+ * The step list: one row per top-level step, its command line and its output.
  *
- * A node is the command line with the time beside it. The output hangs under it,
- * closed by default, behind a `+`/`-` marker: the list is the record of what RAN, and
- * what a step printed is detail you ask for rather than detail that buries the next
- * command. A step that printed nothing shows no marker — but keeps the marker's width,
- * so every command still starts in the same column.
+ * A row is the command line with the time beside it, and then that step's output
+ * underneath — ALWAYS, with nothing to open. What a command printed is part of the
+ * record, not detail you have to ask for, so there is no disclosure here: the list
+ * has no collapsed state and no control that could introduce one.
  *
- * The hover fill belongs to the command line alone, not to the node: with a child open,
- * a background covering the whole node would highlight output that the pointer is
- * nowhere near.
+ * The marker column at the left holds a DOT, one per row, whose colour is that
+ * row's state. It is not a copy of the bar's palette: both read the same
+ * `--step-state-*` names, declared once on the card (see `Row.module.css`), so a
+ * dot and its segment cannot drift apart. The dot is 4px and round, and grows on
+ * hover about its own centre — a transform, so nothing around it moves.
+ *
+ * The output below the command line starts on the command text's OWN column (no
+ * indent of its own), is dimmer than the command, and is separated from it by a
+ * hairline. There is no hover FILL anywhere in the row: the row's answer to the
+ * pointer is the dot's growth and the bar's segment lift, not a background.
  *
  * @module dsh-shell-progress/client/StepList
  */
 
-import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { formatSeconds } from './ProgressBar.tsx'
 import { highlightCommand } from './highlight.ts'
@@ -26,7 +30,7 @@ import styles from './StepList.module.css'
 export interface StepListLabels {
   /** Accessible name of one row. */
   readonly stepLabel: (row: StepRow, total: number) => string
-  /** Label of a step's output block, and of the marker that opens it. */
+  /** Label of a step's output block. */
   readonly outputLabel: string
   /** Label of the output produced before the first step. */
   readonly preambleLabel: string
@@ -55,29 +59,25 @@ function commandContent(text: string, toolName: string): ReactNode {
 }
 
 /**
- * Render one step's node.
+ * Render one step's row.
  * @param props.row - the step.
  * @param props.total - how many steps the command has, for the accessible name.
  * @param props.liveElapsedMs - the running step's clock, read live by the caller
  * so a step in flight keeps counting in this list too.
  * @param props.hovered - true while the bar's segment for THIS step is hovered.
- * @param props.expanded - true while this node's output child is showing.
  * @param props.onHover - reports the pointed-at step upward, so the bar can answer.
- * @param props.onToggle - opens or closes this node's output child.
  * @param props.labels - localized strings.
  * @param props.phaseText - the phase's localized name, announced instead of drawn.
- * @returns the node.
+ * @returns the row.
  */
-function StepRowView({ row, total, toolName, liveElapsedMs, hovered, expanded, onHover, onToggle, labels, phaseText }: {
+function StepRowView({ row, total, toolName, liveElapsedMs, hovered, onHover, labels, phaseText }: {
   readonly row: StepRow
   readonly total: number
   /** The tool that ran this command; it names the highlighting grammar. */
   readonly toolName: string
   readonly liveElapsedMs: number
   readonly hovered: boolean
-  readonly expanded: boolean
   readonly onHover: (index: number | null) => void
-  readonly onToggle: (index: number) => void
   readonly labels: StepListLabels
   readonly phaseText: string
 }): ReactNode {
@@ -88,51 +88,33 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, expanded, o
     ? null
     : formatSeconds(row.phase === 'running' ? liveElapsedMs : row.durationMs)
   const spoken = `${labels.stepLabel(row, total)}, ${phaseText}${duration === null ? '' : `, ${duration}`}`
-  const hasOutput = row.output.length > 0
-  const open = hasOutput && expanded
   return (
     <div
       className={styles.row}
       data-phase={row.phase}
+      // The phase picks the dot's colour; the tone picks which of the phase's
+      // colours, exactly as it does on the bar. Both are attributes rather than
+      // inline styles so the palette stays in the stylesheet it is shared from.
+      data-tone={row.tone}
       data-step={row.index}
       data-hovered={hovered ? 'true' : undefined}
-      data-open={open ? 'true' : undefined}
-      data-toggleable={hasOutput ? 'true' : undefined}
       aria-label={spoken}
       onMouseEnter={() => { onHover(row.index) }}
       onMouseLeave={() => { onHover(null) }}
     >
       {/*
-       * Points at the line the bar's hovered segment belongs to. It is absolutely
-       * positioned into `.steps`'s own padding, so it consumes NO width and every
-       * command line keeps the exact starting position it had before.
+       * The command line is not a hit target any more: there is no child to open,
+       * so a click on it means nothing and the pointer stays a text cursor.
        */}
-      <span className={styles.arrow} data-arrow="true" aria-hidden="true">&gt;</span>
-      {/*
-       * The whole command line is the hit target, because a one-character marker is a
-       * small thing to ask anyone to hit. The marker stops the event so the two
-       * handlers cannot both fire and cancel each other out.
-       */}
-      <div
-        className={styles.headline}
-        data-headline="true"
-        onClick={hasOutput ? () => { onToggle(row.index) } : undefined}
-      >
-        {hasOutput ? (
-          <button
-            type="button"
-            className={styles.toggle}
-            data-toggle="true"
-            aria-expanded={expanded}
-            aria-label={labels.outputLabel}
-            onClick={(event) => { event.stopPropagation(); onToggle(row.index) }}
-          >
-            {/* The triangle is DRAWN, not typed — see the note on `.caret`. */}
-            <span className={styles.caret} aria-hidden="true" />
-          </button>
-        ) : (
-          <span className={styles.toggleSpacer} data-toggle-spacer="true" aria-hidden="true" />
-        )}
+      <div className={styles.headline} data-headline="true">
+        {/*
+         * The dot sits in the marker column the disclosure triangle used to own,
+         * at the same coordinates: the box is unchanged, so it lands beside the
+         * FIRST line of the command whether or not the command wraps.
+         */}
+        <span className={styles.marker} data-marker="true" aria-hidden="true">
+          <span className={styles.dot} data-dot="true" />
+        </span>
         {/*
          * The command and its clock are ONE text flow, not two boxes. As a separate flex
          * item the clock was pushed to the container's edge: stranded far right of a short
@@ -145,14 +127,26 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, expanded, o
           {duration === null ? null : <span className={styles.time} data-time="true">[{duration}]</span>}
         </div>
       </div>
-      {open ? (
+      {/*
+       * The output block is rendered ONLY when the step actually printed something.
+       * A `\n`-only output is a text node, so `:empty` does not match it, and the
+       * block's own margin and padding then add a blank line under a step that
+       * printed nothing — which is what happened before this guard. Nothing here
+       * folds output that exists; it hides a box that has nothing to show.
+       *
+       * Nothing separates the two in this BODY: the hairline that used to sit above
+       * the output is gone, and the divider now lives inside the segment tooltip,
+       * between the command line and the output there (see `bubbleLabel` in
+       * `ProgressBar.tsx`). The dimmer colour is what tells them apart here.
+       */}
+      {row.output.trim() === '' ? null : (
         <pre className={styles.output} data-output="true" aria-label={labels.outputLabel}>{row.output}</pre>
-      ) : null}
+      )}
     </div>
   )
 }
 
-/** The expanded body of the card. */
+/** The body of the card: the preamble, then every step. */
 export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: {
   view: ProgressView
   /** The tool whose command this list belongs to; it names the grammar. */
@@ -163,11 +157,6 @@ export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: 
   /** Reported upward so the bar can highlight the matching segment. */
   onHoverStep?: (index: number | null) => void
 }): ReactNode {
-  // Every node starts closed. Held here rather than in the card because it is the
-  // list's own state: collapsing the card and opening it again resets the tree, which
-  // is what "default collapsed" has to mean.
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set<number>())
-
   if (view.steps.length === 0) return null
 
   const phaseText = (phase: StepPhase): string => phase === 'running'
@@ -177,15 +166,6 @@ export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: 
       : phase === 'failed'
         ? labels.statusFailed
         : labels.statusPending
-
-  const toggle = (index: number): void => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(index)) next.delete(index)
-      else next.add(index)
-      return next
-    })
-  }
 
   return (
     <div className={styles.list}>
@@ -200,9 +180,7 @@ export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: 
           toolName={toolName}
           liveElapsedMs={view.currentElapsedMs}
           hovered={hoveredIndex === row.index}
-          expanded={expanded.has(row.index)}
           onHover={(index) => { onHoverStep?.(index) }}
-          onToggle={toggle}
           labels={labels}
           phaseText={phaseText(row.phase)}
         />

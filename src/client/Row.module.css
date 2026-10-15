@@ -2,10 +2,41 @@
  * the chevron on the LEFT, the hover colour and the title typography. This file
  * supplies the pieces the shell's own tool rows also supply — the separator, the
  * summary, and the expanded body — with the shell's numbers. */
+/* The card is the common ancestor of the bar and the step list, and custom
+ * properties INHERIT — which is what lets two CSS modules read one source.
+ *
+ * `--step-state-*` is the single colour source for a step's state: the bar's
+ * segments (`ProgressBar.module.css`) and the step list's dots
+ * (`StepList.module.css`) each read these names, so a dot cannot drift from the
+ * segment it stands for. The values are the design system's own semantic tokens,
+ * so theming — the dark overrides included — stays the theme's business rather
+ * than becoming a copy of a hex.
+ *
+ * `--card-pad-right` is the ONE right inset shared by the two rows that have to
+ * line up: the progress line and the step list. One number for both is what makes
+ * their right edges the same edge instead of two values that merely look close.
+ * The COUNTER is the outermost element of the progress line, so it — not the bar,
+ * which now stops short of it by its own width and the row's gap — is the element
+ * whose right edge that inset places on the step rows' edge. */
 .card {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  --step-state-pending: var(--dsw-alias-bg-skeleton);
+  --step-state-running: var(--dsw-alias-state-success-tertiary);
+  --step-state-done: var(--dsw-alias-state-success-primary);
+  --step-state-slow: var(--dsw-alias-state-warn-primary);
+  --step-state-error: var(--dsw-alias-state-error-primary);
+  /* The same two translucencies the bar uses, so a dot and its segment read as
+   * the same material rather than as two colours that merely look close. */
+  --step-alpha-pending: 0.5;
+  --step-alpha-running: 0.7;
+  /* 4px: the gap between the card's own content box and the step rows' right
+   * edge. The COUNTER is the element that lands on that edge, because it is the
+   * outermost element of the progress line now that the count sits to the right of
+   * the bar; the bar's right edge stops short of it by the count's width and the
+   * row's 8px gap, which is the layout itself rather than a second inset. */
+  --card-pad-right: 4px;
 }
 
 /* The shell's separator is a 2×2px dot between 8px margins, NOT a `·` inside a
@@ -32,13 +63,17 @@
 }
 
 /* Indented to the title, clear of the leading glyph: the shell's own leading
- * slot is `calc(16px + delta)` wide plus a 6px gap. */
+ * slot is `calc(16px + delta)` wide plus a 6px gap. Its RIGHT inset is the
+ * shared `--card-pad-right`, the same one the step list uses, so the counter that
+ * ENDS this row — the bar's count, now to the right of the bar — ends where the
+ * step rows end. */
 .progressLine {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding-left: calc(22px + var(--dsh-content-font-delta, 0px));
+  padding-right: var(--card-pad-right);
   padding-bottom: 2px;
 }
 
@@ -51,13 +86,26 @@
   /* `21px + 1px` of the row's own padding keeps every command line at the same 22px
    * it has always been at, while the row still has 1px of fill around it. */
   padding-left: calc(21px + var(--dsh-content-font-delta, 0px));
-  /* 7px on the right: the list otherwise runs right up to the card's edge, and the 1px
-   * the row itself carries is not enough margin to read as one. */
-  padding-right: 7px;
+  /* The step list's right inset, and the SAME value the progress line uses: the
+   * count that ends the progress line and the step rows are one edge, so the two
+   * lines of the card finish together instead of nearly finishing together. */
+  padding-right: var(--card-pad-right);
 }
 
+/* The count, now the LAST element of the progress line: it is what the row ends
+ * on, so its right edge is the boundary the step rows have to meet (see
+ * `.progressLine` and `--card-pad-right`).
+ *
+ * It is CENTRED against the bar rather than baseline-aligned to it. A shared
+ * `line-height` equal to the track's own height is what makes the two centres the
+ * same number rather than two numbers that are close: the counter's line box and
+ * the bar are then the same height, and the row's own `align-items: center` places
+ * both from the same top. `align-self` states the centring on this element as well,
+ * so it does not depend on a value set one level up. */
 .counter {
   flex: 0 0 auto;
+  align-self: center;
+  line-height: 9px;
   color: var(--dsw-alias-label-caption, inherit);
   font-size: var(--dsh-content-font-size-secondary, 13px);
   font-variant-numeric: tabular-nums;

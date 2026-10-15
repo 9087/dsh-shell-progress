@@ -165,41 +165,513 @@ test.describe('the shell_progress card in a real shell', () => {
     )
     expect(expanded).toContain('[1/4] fetch')
 
-    // Hover answers "which line is this segment?", and it answers with a
-    // BACKGROUND TINT — the `>` marker belongs to the RUNNING step instead, so a
-    // settled card shows no arrow at all, not even while hovering. Both halves are
-    // measured here rather than eyeballed.
+    // ---------------------------------------------------------------------------
+    // The new contract, measured on the OPENED card, in a real browser: the two
+    // right edges, the dot in the triangle's coordinates, the always-rendered
+    // output and its indent, and the colour the dot and its segment share.
+    // ---------------------------------------------------------------------------
+
+    // (d) The removals, from the DOM. A triangle would be a border-drawn empty
+    // span, so the marker's own computed box is inspected for one as well as the
+    // markup being counted.
+    const leftovers = await card.evaluate((node) => {
+      const dot = node.querySelector('[data-dot]')
+      const dotStyle = dot === null ? null : getComputedStyle(dot)
+      return {
+        arrows: node.querySelectorAll('[data-arrow]').length,
+        toggles: node.querySelectorAll('[data-toggle]').length,
+        spacers: node.querySelectorAll('[data-toggle-spacer]').length,
+        openFlags: node.querySelectorAll('[data-step][data-open]').length,
+        gtGlyphs: [...node.querySelectorAll('[data-step] *')]
+          .filter((element) => element.children.length === 0 && (element.textContent ?? '').trim() === '>')
+          .length,
+        dotBorderLeft: dotStyle === null ? 'none' : dotStyle.borderLeftWidth,
+        dotTransform: dotStyle === null ? 'none' : dotStyle.transform,
+      }
+    })
+    console.log(`[e2e] leftovers ${JSON.stringify(leftovers)}`)
+    expect(leftovers.arrows, 'a `>` running marker is still in the DOM').toBe(0)
+    expect(leftovers.toggles, 'a step disclosure toggle is still in the DOM').toBe(0)
+    expect(leftovers.spacers, 'the toggle spacer is still in the DOM').toBe(0)
+    expect(leftovers.gtGlyphs, 'a literal `>` glyph is still rendered inside a step').toBe(0)
+    expect(leftovers.openFlags, 'a data-open flag survived on a step').toBe(0)
+    // The triangle was `border-left: 5px solid currentColor` and turned by a
+    // transform; the dot has neither.
+    expect(leftovers.dotBorderLeft, 'the marker still draws a border triangle').toBe('0px')
+    expect(leftovers.dotTransform, 'the marker still carries the triangle rotation').toBe('none')
+
+    // (a) The COUNTER — the progress line's outermost element, now that it sits to
+    // the right of the bar — carries the right edge the step rows have to meet. This
+    // replaces the assertion that used to measure the BAR against the rows: with the
+    // count moved to the right of the bar, the bar's own right edge legitimately sits
+    // left of that edge by the count's width plus the row's gap, so the bar is no
+    // longer the element that can be compared against the rows.
+    const edges = await card.evaluate((node) => {
+      const bar = node.querySelector('[role="progressbar"]')
+      const counter = node.querySelector('[data-counter]')
+      const line = node.querySelector('[data-progress-line]')
+      const rowBoxes = [...node.querySelectorAll('[data-step]')].map((row) => row.getBoundingClientRect())
+      // FLAT numbers only: every centre is returned as its own field. A nested
+      // `{ x, y }` per element is the shape this measurement started as, and those
+      // sub-objects did not survive the trip out of the page — the call returned with
+      // the key present and the value gone, which failed as "reading 'y' of
+      // undefined" one line later rather than as a wrong number here.
+      const box = (element: Element | null): DOMRect | null =>
+        element === null ? null : element.getBoundingClientRect()
+      const centreY = (element: Element | null): number => {
+        const rect = box(element)
+        return rect === null ? -1 : rect.top + rect.height / 2
+      }
+      const centreX = (element: Element | null): number => {
+        const rect = box(element)
+        return rect === null ? -1 : rect.left + rect.width / 2
+      }
+      const barBox = box(bar)
+      const counterBox = box(counter)
+      const lineBox = box(line)
+      return {
+        barLeft: barBox?.left ?? -1,
+        barRight: barBox?.right ?? -1,
+        barCentreY: centreY(bar),
+        // The count's own element box. Its `line-height` is the track's height, so
+        // the box centre is the centre of the drawn text rather than of a taller
+        // inherited line box; the text range is read beside it so the log shows both.
+        counterLeft: counterBox?.left ?? -1,
+        counterRight: counterBox?.right ?? -1,
+        counterCentreX: centreX(counter),
+        counterCentreY: centreY(counter),
+        counterTextCentreY: counter === null || counter.firstChild === null
+          ? -1
+          : (() => {
+            const range = document.createRange()
+            range.selectNodeContents(counter)
+            const textBox = range.getBoundingClientRect()
+            return textBox.top + textBox.height / 2
+          })(),
+        counterText: counter === null ? '' : (counter.textContent ?? ''),
+        lineLeft: lineBox?.left ?? -1,
+        lineRight: lineBox?.right ?? -1,
+        lineTop: lineBox?.top ?? -1,
+        lineHeight: lineBox?.height ?? -1,
+        barTop: barBox?.top ?? -1,
+        barHeight: barBox?.height ?? -1,
+        counterTop: counterBox?.top ?? -1,
+        counterHeight: counterBox?.height ?? -1,
+        lineCentreY: centreY(line),
+        rowLefts: rowBoxes.map((rowBox) => rowBox.left),
+        rowRights: rowBoxes.map((rowBox) => rowBox.right),
+        cardRight: node.getBoundingClientRect().right,
+      }
+    })
+    // The sub-pixel tolerance every alignment below is measured against: one CSS
+    // pixel on a fractional device ratio, which is the finest a layout can promise.
+    const TOLERANCE = 0.5
+    const round2 = (value: number): number => Math.round(value * 100) / 100
+    const rowRightSpread = Math.max(...edges.rowRights) - Math.min(...edges.rowRights)
+    const rowRightEdge = Math.max(...edges.rowRights)
+    // The GROUP is bar + count: the two elements that have to share one right edge.
+    const groupRight = Math.max(edges.barRight, edges.counterRight)
+    const groupToRowRight = Math.abs(groupRight - rowRightEdge)
+    const countToRowRight = Math.abs(edges.counterRight - rowRightEdge)
+    const barToRowRight = Math.abs(edges.barRight - rowRightEdge)
+    const countPastBar = edges.counterLeft - edges.barRight
+    const centreGap = Math.abs(edges.barCentreY - edges.counterCentreY)
+    const barToLineCentre = Math.abs(edges.barCentreY - edges.lineCentreY)
+    const countToLineCentre = Math.abs(edges.counterCentreY - edges.lineCentreY)
+    console.log(`[e2e] edges bar x ${round2(edges.barLeft)}..${round2(edges.barRight)}; count x ${round2(edges.counterLeft)}..${round2(edges.counterRight)} (text ${JSON.stringify(edges.counterText)}); group right ${round2(groupRight)} vs rows right ${round2(rowRightEdge)} (count-to-row gap ${round2(countToRowRight)}, group-to-row gap ${round2(groupToRowRight)}, bar-to-row gap ${round2(barToRowRight)}, count past bar ${round2(countPastBar)}); step rows x ${round2(Math.min(...edges.rowLefts))}..${round2(rowRightEdge)} (right spread ${round2(rowRightSpread)}); line x ${round2(edges.lineLeft)}..${round2(edges.lineRight)} (inset ${round2(edges.cardRight - edges.lineRight)})`)
+    console.log(`[e2e] centres bar y ${round2(edges.barCentreY)} / count y ${round2(edges.counterCentreY)} (text ${round2(edges.counterTextCentreY)}) / line y ${round2(edges.lineCentreY)}; bar-to-count ${round2(centreGap)}, bar-to-line ${round2(barToLineCentre)}, count-to-line ${round2(countToLineCentre)}; boxes bar y ${round2(edges.barTop)}..${round2(edges.barTop + edges.barHeight)}, count y ${round2(edges.counterTop)}..${round2(edges.counterTop + edges.counterHeight)}, line y ${round2(edges.lineTop)}..${round2(edges.lineTop + edges.lineHeight)}`)
+    expect(edges.rowRights.length, 'no step rows rendered, so there is no right edge to compare').toBe(4)
+    expect(rowRightSpread, 'the step rows do not share one right edge').toBeLessThan(TOLERANCE)
+    // THE BOUNDARY: the counter is the outermost element, so its right edge is what
+    // has to land on the step rows' edge. The bar's right edge is NOT asserted
+    // against the rows — it is asserted to be LEFT of the count, which is the layout
+    // the count moving to the right of the bar is.
+    expect(countToRowRight, `the count's right edge does not meet the step rows' right edge (${round2(countToRowRight)}px apart)`).toBeLessThan(TOLERANCE)
+    expect(countPastBar, `the count is not to the right of the bar (its left edge sits ${round2(countPastBar)}px from the bar's right edge)`).toBeGreaterThan(0)
+    // Non-vacuous in the other direction too: the BAR's right edge must now stop
+    // short of the boundary rather than coincide with it, or "the count is the
+    // boundary" would be true only because the bar happens to land on the same edge.
+    expect(barToRowRight, 'the bar still ends on the step rows\' right edge, so nothing was measured about the count').toBeGreaterThan(TOLERANCE)
+    // The group as a whole is flush with the rows (belt and braces: the same claim,
+    // stated about the pair rather than about the element that carries it).
+    expect(groupToRowRight, 'the progress group does not finish on the step rows\' right edge').toBeLessThan(TOLERANCE)
+    // The count and the bar share ONE vertical centre. That is the contract, and it
+    // is measured on the two ELEMENTS: their own box centres are the same number
+    // (both 318.5 here) to the sub-pixel tolerance. The progress line's own box centre
+    // is logged beside them as the reference the two items are centred in, and is held
+    // to 1.5px rather than 0.5px on purpose: the line's box is 314..325 — the 9px items
+    // plus its own 2px `padding-bottom` — so its arithmetic centre sits 1px below the
+    // centre the items share. That 1px is the row's asymmetric padding, not the
+    // centring this change introduced, and pinning it tighter would be measuring the
+    // card's padding rather than the two elements' alignment.
+    expect(centreGap, `the count and the bar do not share a vertical centre (${round2(centreGap)}px apart)`).toBeLessThan(TOLERANCE)
+    expect(barToLineCentre, `the bar is ${round2(barToLineCentre)}px off the progress line's centre`).toBeLessThan(1.5)
+    expect(countToLineCentre, `the count is ${round2(countToLineCentre)}px off the progress line's centre`).toBeLessThan(1.5)
+
+    // (c) The output is THERE with no interaction: no toggle was clicked to get it
+    // (none exists), every step's block is rendered, and a block has real width. Its
+    // INDENT is now the command text's OWN column rather than a second step in.
+    const outputs = card.locator('[data-output]')
+    expect(await outputs.count(), 'not every step rendered an output block').toBe(4)
+    const outputGeometry = await card.evaluate((node) => [...node.querySelectorAll('[data-step]')].map((row) => {
+      const code = row.querySelector('[data-code]')
+      const output = row.querySelector('[data-output]')
+      // The column lives in the block's padding, so the block's own border box still
+      // starts at the row's left edge. The text's x is what moved, and a Range over
+      // the block's contents is how the browser reports exactly that.
+      const textLeft = output === null
+        ? -1
+        : (() => {
+          const range = document.createRange()
+          range.selectNodeContents(output)
+          return range.getBoundingClientRect().left
+        })()
+      return {
+        text: (output?.textContent ?? '').trim(),
+        rowLeft: row.getBoundingClientRect().left,
+        codeLeft: code?.getBoundingClientRect().left ?? -1,
+        outputLeft: output?.getBoundingClientRect().left ?? -1,
+        outputTextLeft: textLeft,
+        outputPaddingLeft: output === null ? '' : getComputedStyle(output).paddingLeft,
+        outputWidth: output?.getBoundingClientRect().width ?? 0,
+      }
+    }))
+    const firstOutput = outputGeometry[0]
+    const outputIndent = (firstOutput?.outputTextLeft ?? 0) - (firstOutput?.rowLeft ?? 0)
+    const outputPastCommand = (firstOutput?.outputTextLeft ?? 0) - (firstOutput?.codeLeft ?? 0)
+    const commandColumn = (firstOutput?.codeLeft ?? 0) - (firstOutput?.rowLeft ?? 0)
+    console.log(`[e2e] output blocks ${JSON.stringify(outputGeometry.map((item) => ({ text: item.text, paddingLeft: item.outputPaddingLeft, indentInRow: round2(item.outputTextLeft - item.rowLeft), pastCommand: round2(item.outputTextLeft - item.codeLeft), width: round2(item.outputWidth) })))}`)
+    console.log(`[e2e] output column: command text starts ${round2(commandColumn)}px into its row; output padding-left ${String(firstOutput?.outputPaddingLeft)}`)
+    expect(firstOutput?.text, 'the first step\'s output is not rendered').toBe('[1/4] fetch')
+    expect(outputGeometry.every((item) => item.outputWidth > 0), 'an output block rendered with no width').toBe(true)
+    // The output's padding IS the command text's own column — 8px marker + 6px gap +
+    // the headline's 1px — so the two texts start on the same edge, with no indent of
+    // the output's own. The measured command column is the second half of that claim:
+    // the number is checked against the layout rather than against itself.
+    expect(firstOutput?.outputPaddingLeft, 'the output block does not carry the command\'s column').toBe('15px')
+    expect(
+      Math.abs(Number.parseFloat(firstOutput?.outputPaddingLeft ?? '-1') - commandColumn),
+      `the output's padding-left ${String(firstOutput?.outputPaddingLeft)} is not the command text's column (${round2(commandColumn)}px)`,
+    ).toBeLessThan(0.5)
+    expect(
+      Math.abs(outputIndent - commandColumn),
+      `the output text sits ${round2(outputIndent)}px into its row while the command starts at ${round2(commandColumn)}px`,
+    ).toBeLessThan(0.5)
+    expect(
+      Math.abs(outputPastCommand),
+      `the output is ${round2(outputPastCommand)}px past the command's own left edge, so it is still indented`,
+    ).toBeLessThan(0.5)
+
+    // (b) The dot is where the triangle was: the same 8px marker column, centred on
+    // the FIRST line of the command — the two coordinates the caret occupied.
+    const dot = await card.locator('[data-dot]').first().evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return {
+        centreX: box.left + box.width / 2,
+        centreY: box.top + box.height / 2,
+        width: box.width,
+        height: box.height,
+        radius: style.borderRadius,
+      }
+    })
+    const markerBox = await card.locator('[data-marker]').first().evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return { width: getComputedStyle(element).width, centreX: box.left + box.width / 2 }
+    })
+    const firstLineCentre = await card.locator('[data-code]').first().evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return box.top + Number.parseFloat(getComputedStyle(element).lineHeight) / 2
+    })
+    console.log(`[e2e] dot ${round2(dot.width)}x${round2(dot.height)} r=${dot.radius}; marker width ${markerBox.width}; dot centre x ${round2(dot.centreX)} / y ${round2(dot.centreY)}; marker centre x ${round2(markerBox.centreX)}; first line centre y ${round2(firstLineCentre)}`)
+    expect(markerBox.width, 'the marker column is not the shared 8px').toBe('8px')
+    expect(dot.width, 'the dot is not round').toBe(dot.height)
+    expect(dot.width, 'the dot has no size').toBeGreaterThan(3)
+    expect(dot.radius, 'the dot is not a circle').toBe('50%')
+    expect(Math.abs(dot.centreX - markerBox.centreX), 'the dot is not centred in the marker column').toBeLessThan(1)
+    expect(Math.abs(dot.centreY - firstLineCentre), 'the dot is not centred on the first line').toBeLessThan(1)
+    // ...and it is SMALLER than it was: 4px, down from 6px. 4px is also the size that
+    // stays a whole number of device pixels at 1.25x scaling (4 × 1.25 = 5) where 6px
+    // did not (6 × 1.25 = 7.5), which is what keeps a round dot from reading as a
+    // clipped square at fractional Windows scaling.
+    expect(dot.width, `the dot is still ${round2(dot.width)}px, not the smaller size`).toBeLessThan(6)
+    expect(Math.abs(dot.width - 4), `the dot measures ${round2(dot.width)}px, not 4px`).toBeLessThan(0.5)
+    // Nothing is left that could square it off: a border or padding would add a second
+    // box for the corner radius to have to cover, and `border-box` keeps any future
+    // border inside the radius rather than outside it.
+    const dotShape = await card.locator('[data-dot]').first().evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        border: style.borderWidth,
+        padding: style.padding,
+        boxSizing: style.boxSizing,
+        ratio: style.aspectRatio,
+        colour: style.backgroundColor,
+      }
+    })
+    console.log(`[e2e] dot shape border ${dotShape.border} padding ${dotShape.padding} box-sizing ${dotShape.boxSizing} aspect-ratio ${dotShape.ratio} colour ${dotShape.colour}`)
+    expect(dotShape.border, 'the dot still draws a border').toBe('0px')
+    expect(dotShape.padding, 'the dot still has padding').toBe('0px')
+    expect(dotShape.boxSizing, 'a border could still grow the dot past its radius').toBe('border-box')
+
+    // (e) The dot's colour IS its segment's colour, for the same state — paired by
+    // state rather than by eye, because two matching colours prove nothing unless
+    // they are the same step's.
+    const colours = await card.evaluate((node) => {
+      const rows = [...node.querySelectorAll('[data-step]')]
+      const barSegments = [...node.querySelectorAll('[role="progressbar"] [data-phase]')]
+      return rows.map((row, index) => {
+        const dotNode = row.querySelector('[data-dot]')
+        const segment = barSegments[index]
+        return {
+          index,
+          phase: row.getAttribute('data-phase'),
+          tone: row.getAttribute('data-tone'),
+          dot: dotNode === null ? null : getComputedStyle(dotNode).backgroundColor,
+          segmentPhase: segment?.getAttribute('data-phase') ?? null,
+          segmentTone: segment?.getAttribute('data-tone') ?? null,
+          segment: segment === undefined ? null : getComputedStyle(segment).backgroundColor,
+        }
+      })
+    })
+    const dotColours = new Set(colours.map((item) => item.dot))
+    console.log(`[e2e] dot vs segment colours ${JSON.stringify(colours.map((item) => ({ step: item.index + 1, state: `${String(item.phase)}/${String(item.tone)}`, dot: item.dot, segment: item.segment })))}`)
+    console.log(`[e2e] distinct dot colours ${String(dotColours.size)}: ${JSON.stringify([...dotColours])}`)
+    expect(colours.length, 'fewer rows than segments, so nothing could be paired by state').toBe(4)
+    for (const item of colours) {
+      expect(item.segmentPhase, `row ${String(item.index + 1)} does not match its segment's phase`).toBe(item.phase)
+      expect(item.segmentTone, `row ${String(item.index + 1)} does not match its segment's tone`).toBe(item.tone)
+      expect(item.dot, `row ${String(item.index + 1)}: dot ${String(item.dot)} != segment ${String(item.segment)}`).toBe(item.segment)
+      expect(item.dot, 'the dot is transparent').not.toBe('rgba(0, 0, 0, 0)')
+    }
+    // Non-vacuous: the fixture's step 2 takes 5.2s, so it is `slow` while the rest
+    // are `normal`. If every dot were the same colour, index-matching would have
+    // passed without proving the palette is being followed.
+    expect(dotColours.size, `every dot is one colour (${JSON.stringify([...dotColours])}), so state-following was not proved`).toBeGreaterThanOrEqual(2)
+
+
+    // The OUTPUT is dimmer than the command line in BOTH themes, and a hairline
+    // separates the two. "Dimmer" is measured as CONTRAST against whatever the card is
+    // actually painted on: a colour that merely differs from the other one would prove
+    // nothing about which of the two the reader sees first.
+    const readability = await card.evaluate((node) => {
+      /** The numeric channels of a computed colour. */
+      const channels = (value: string): number[] => (value.match(/[\d.]+/gu) ?? []).map(Number)
+      /** WCAG relative luminance of an sRGB colour. */
+      const luminance = (rgb: readonly number[]): number => {
+        const linear = (raw: number): number => {
+          const value = (raw ?? 0) / 255
+          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * linear(rgb[0] ?? 0) + 0.7152 * linear(rgb[1] ?? 0) + 0.0722 * linear(rgb[2] ?? 0)
+      }
+      /**
+       * Whether a computed colour actually paints. `rgb(r, g, b)` — three channels —
+       * is an OPAQUE colour; only a translucent one carries a fourth.
+       */
+      const opaque = (value: readonly number[]): boolean => value.length >= 3 && (value[3] ?? 1) > 0
+      /**
+       * What the card is actually painted on. The first ancestor that paints answers it
+       * whenever one is reachable; if the shell's tree ends at a shadow boundary first,
+       * the theme's own surface token is resolved through a probe INSIDE the card —
+       * custom properties inherit across that boundary, which is why the text colours
+       * follow the theme attribute in the first place. The source is reported so the
+       * log says which of the two the numbers came from.
+       */
+      const backdrop = (element: Element): { rgb: number[], source: string } => {
+        let current: Element | null = element
+        while (current !== null) {
+          const value = channels(getComputedStyle(current).backgroundColor)
+          if (opaque(value)) return { rgb: value, source: 'painted ancestor' }
+          current = current.parentElement
+        }
+        const probe = document.createElement('div')
+        probe.style.backgroundColor = 'var(--dsw-alias-bg-base, rgba(0, 0, 0, 0))'
+        element.appendChild(probe)
+        const token = channels(getComputedStyle(probe).backgroundColor)
+        probe.remove()
+        if (opaque(token)) return { rgb: token, source: 'the theme\'s bg-base token' }
+        return { rgb: [255, 255, 255], source: 'fallback white' }
+      }
+      /** Contrast ratio between a colour and the surface behind it. */
+      const contrast = (foreground: readonly number[], background: readonly number[]): number => {
+        const a = luminance(foreground)
+        const b = luminance(background)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+      }
+      const sample = (): {
+        codeColour: string
+        outputColour: string
+        background: string
+        backgroundSource: string
+        codeContrast: number
+        outputContrast: number
+        dividerWidth: string
+        dividerStyle: string
+      } => {
+        const code = node.querySelector('[data-code]')
+        const output = node.querySelector('[data-output]')
+        const outputStyle = output === null ? null : getComputedStyle(output)
+        const codeStyle = code === null ? null : getComputedStyle(code)
+        const outputColour = outputStyle?.color ?? ''
+        const codeColour = codeStyle?.color ?? ''
+        const background = output === null
+          ? { rgb: [255, 255, 255], source: 'fallback white' }
+          : backdrop(output)
+        return {
+          codeColour,
+          outputColour,
+          background: `rgb(${background.rgb.slice(0, 3).join(', ')})`,
+          backgroundSource: background.source,
+          codeContrast: codeColour === '' ? 0 : contrast(channels(codeColour).slice(0, 3), background.rgb),
+          outputContrast: outputColour === '' ? 0 : contrast(channels(outputColour).slice(0, 3), background.rgb),
+          dividerWidth: outputStyle?.borderTopWidth ?? '',
+          dividerStyle: outputStyle?.borderTopStyle ?? '',
+        }
+      }
+      const light = sample()
+      document.body.setAttribute('data-ds-dark-theme', '')
+      const dark = sample()
+      document.body.removeAttribute('data-ds-dark-theme')
+      return { light, dark }
+    })
+    console.log(`[e2e] output colour light ${readability.light.codeColour} (contrast ${round2(readability.light.codeContrast)} on ${readability.light.background}, ${readability.light.backgroundSource}) -> ${readability.light.outputColour} (contrast ${round2(readability.light.outputContrast)}); card-body divider ${readability.light.dividerWidth}/${readability.light.dividerStyle}`)
+    console.log(`[e2e] output colour dark  ${readability.dark.codeColour} (contrast ${round2(readability.dark.codeContrast)} on ${readability.dark.background}, ${readability.dark.backgroundSource}) -> ${readability.dark.outputColour} (contrast ${round2(readability.dark.outputContrast)}); card-body divider ${readability.dark.dividerWidth}/${readability.dark.dividerStyle}`)
+    for (const [theme, sample] of [['light', readability.light], ['dark', readability.dark]] as const) {
+      expect(sample.backgroundSource, `the ${theme}-theme backdrop had to be GUESSED (${sample.backgroundSource}), so "dimmer" could not be measured`).not.toBe('fallback white')
+      expect(sample.outputColour, `the ${theme}-theme output wears the command line's own colour`).not.toBe(sample.codeColour)
+      expect(sample.outputContrast, `the ${theme}-theme output colour is not dimmer than the command's (${round2(sample.outputContrast)} vs ${round2(sample.codeContrast)})`).toBeLessThan(sample.codeContrast)
+      // NO divider in the card body: the border the old assertion pinned at `1px` and a
+      // colour is now BOTH halves of an absent border — no width, and no border STYLE.
+      // The pair is what makes this a removal rather than a line that merely stopped
+      // painting, and the divider the reader now sees is the one inside the segment
+      // tooltip, measured against its own rendered width in the bubble block below.
+      expect(sample.dividerWidth, `the ${theme}-theme card body still draws a divider above the output`).toBe('0px')
+      expect(sample.dividerStyle, `the ${theme}-theme output still carries a border style`).toBe('none')
+    }
+    // The output colour is still the THEME's answer rather than a fixed colour: flipping
+    // the shell's own dark attribute has to change what is actually painted. (The old
+    // companion assertion — that the DIVIDER's colour followed the theme — is replaced by
+    // the width/style pair above: a border that is not drawn has no colour to follow
+    // anything, and reading its computed colour would only have read the text's.)
+    expect(readability.dark.outputColour, 'the output colour does not follow the theme').not.toBe(readability.light.outputColour)
+
+    // Hover answers "which line is this segment?" with NO BACKGROUND AT ALL, in either
+    // theme. What is KEPT is the link — the row still answers a hovered segment
+    // (through the segment's own lift, measured below) and a hovered row still lights
+    // its segment. What is gone is the fill: a slab drawn around text the pointer may
+    // be nowhere near.
     const segments = card.locator('[role="progressbar"] [data-phase]')
-    const arrow = card.locator('[data-arrow]').first()
-    const firstRow = arrow.locator('..')
+    const firstStep = card.locator('[data-step]').first()
     const firstCode = card.locator('[data-code]').first()
-    const arrowOpacity = async (): Promise<string> =>
-      await arrow.evaluate((node) => getComputedStyle(node).opacity)
-    // The hover fill lives on the command LINE, not the node: with a child open, a
-    // background over the whole node would highlight output the pointer is nowhere
-    // near. So this measures the headline.
+    // The fill lived on the command LINE, so that is where its absence is measured.
     const rowBackground = async (): Promise<string> =>
       await card.locator('[data-headline]').first().evaluate((node) => getComputedStyle(node).backgroundColor)
     const codeLeft = async (): Promise<number> => (await firstCode.boundingBox())?.x ?? -1
 
-    const beforeOpacity = await arrowOpacity()
-    const beforeBackground = await rowBackground()
+    const restingBackground = await rowBackground()
     const before = await codeLeft()
     await segments.first().hover()
     await page.waitForTimeout(200)
-    const afterOpacity = await arrowOpacity()
-    const afterBackground = await rowBackground()
+    const hoveredBackground = await rowBackground()
+    // The DARK theme is read while the segment is STILL hovered — precisely the state
+    // the fill used to appear in — so this is its absence in both themes.
+    const darkBackground = await card.locator('[data-headline]').first().evaluate((node) => {
+      document.body.setAttribute('data-ds-dark-theme', '')
+      const value = getComputedStyle(node).backgroundColor
+      document.body.removeAttribute('data-ds-dark-theme')
+      return value
+    })
     const after = await codeLeft()
-    console.log(`[e2e] arrow ${beforeOpacity} -> ${afterOpacity}; row bg ${beforeBackground} -> ${afterBackground}; code x ${String(before)} -> ${String(after)}`)
+    console.log(`[e2e] hover row bg ${restingBackground} -> ${hoveredBackground} (dark ${darkBackground}); code x ${String(before)} -> ${String(after)}`)
 
-    // No step of this settled fixture is running, so `>` stays hidden — including
-    // through the hover. It marks the executing step, not the pointed-at one.
-    expect(beforeOpacity, 'the running marker is shown on a settled card').toBe('0')
-    expect(afterOpacity, 'the running marker follows the pointer').toBe('0')
-    // The hover highlight IS the answer to hovering, and it is a background change.
-    expect(afterBackground, 'hovering a segment did not highlight the matching row').not.toBe(beforeBackground)
-    // And it must not move any text: no margin or padding takes part in it.
-    expect(after, 'the hover highlight moved the command text').toBe(before)
+    expect(restingBackground, 'the row paints a background at rest').toBe('rgba(0, 0, 0, 0)')
+    expect(hoveredBackground, 'hovering a segment painted a background on the matching row').toBe(restingBackground)
+    expect(darkBackground, 'the row paints a background in the DARK theme while hovered').toBe(restingBackground)
+    // And nothing about the hover moves the text: no margin or padding takes part.
+    expect(after, 'the hover moved the command text').toBe(before)
+
+    // The bubble carries that step's OUTPUT under its command line, with a DIVIDER
+    // between them. It is portaled to `document.body`, so it is read from the page
+    // rather than the card: the shell marks it `role="tooltip"`, and it is only in the
+    // DOM while showing. The visible one is taken by pseudo-class rather than by DOM
+    // order — the fixture also has a native card, and the tooltip that is SHOWING is
+    // the one this hover opened.
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('[role="tooltip"]')]
+        .some((element) => getComputedStyle(element).visibility === 'visible'),
+      undefined,
+      { timeout: 10_000 },
+    )
+    const bubble = await page.locator('[role="tooltip"]:visible').first().evaluate((node) => {
+      const label = node.querySelector('span')
+      const text = node.textContent ?? ''
+      const lines = text.split('\n')
+      // What the label is MADE of. The shell's `Tooltip` prop is
+      // `label: string | (() => string)` and its bubble renders the resolved value as a
+      // text child, so a node — a divider element, a token span — cannot be here. The
+      // children are listed rather than assumed, which is what makes the absence of
+      // highlighting below a MEASUREMENT instead of a reading of the type.
+      const children = [...(label?.childNodes ?? [])].map((child) =>
+        child.nodeType === Node.TEXT_NODE ? '#text' : `<${(child as Element).tagName.toLowerCase()}>`)
+      /** The rendered width of one line, which is `[from, to)` inside the label's text. */
+      const widthOf = (from: number, to: number): number => {
+        const textNode = label?.firstChild
+        if (textNode === null || textNode === undefined || textNode.nodeType !== Node.TEXT_NODE) return -1
+        const range = document.createRange()
+        range.setStart(textNode, from)
+        range.setEnd(textNode, to)
+        return range.getBoundingClientRect().width
+      }
+      const widths: number[] = []
+      let start = 0
+      for (const line of lines) {
+        widths.push(widthOf(start, start + line.length))
+        start += line.length + 1
+      }
+      return {
+        text,
+        lines,
+        widths,
+        whiteSpace: getComputedStyle(node).whiteSpace,
+        visibility: getComputedStyle(node).visibility,
+        children,
+        tokenSpans: label === null ? -1 : label.querySelectorAll('span[style]').length,
+      }
+    })
+    console.log(`[e2e] segment tooltip visible=${bubble.visibility} white-space=${bubble.whiteSpace} lines=${String(bubble.lines.length)} widths=${JSON.stringify(bubble.widths.map(round2))} children=${JSON.stringify(bubble.children)} tokenSpans=${String(bubble.tokenSpans)} ${JSON.stringify(bubble.text)}`)
+    expect(bubble.visibility, 'the segment\'s bubble is not visible').toBe('visible')
+    // `pre-line` is what makes the label's newline the line break the reader sees.
+    expect(bubble.whiteSpace, 'the bubble does not render the label\'s newlines').toBe('pre-line')
+    // EXACTLY the command line with its clock, then the divider, then that step's own
+    // output beneath it. 31 glyphs: the command line is 31 characters, so it is the
+    // widest line the rule is sized to.
+    expect(bubble.text, 'the bubble is not the step\'s command line, a divider and its own output').toBe(
+      `Write-Output "[1/4] fetch" [1s]\n${'\u2500'.repeat(31)}\n[1/4] fetch`,
+    )
+    // The divider inside the bubble is a REAL rendered line, not a character in the
+    // output: it has its own line, and its own measured width.
+    expect(bubble.lines[1], 'the bubble has no divider line between the command and the output').toMatch(/^\u2500+$/u)
+    expect(bubble.lines[1]?.length, 'the divider is not sized to the widest line it separates').toBe(31)
+    const dividerWidth = bubble.widths[1] ?? -1
+    const textWidth = Math.max(bubble.widths[0] ?? -1, bubble.widths[2] ?? -1)
+    expect(dividerWidth, 'the divider has no rendered width').toBeGreaterThan(0)
+    // Measured AGAINST THE TEXT it separates, in both directions: a rule far under the
+    // text reads as a stub, and one far over it widens the bubble for nothing. The
+    // window is generous on purpose — a box-drawing glyph's advance is not a
+    // proportional letter's — but it is a real bound either way.
+    expect(dividerWidth, `the divider is ${round2(dividerWidth)}px against ${round2(textWidth)}px of text: too short to read as a rule`).toBeGreaterThan(textWidth * 0.5)
+    expect(dividerWidth, `the divider is ${round2(dividerWidth)}px against ${round2(textWidth)}px of text: it widens the bubble for nothing`).toBeLessThan(textWidth * 2)
+    // AND SYNTAX HIGHLIGHTING IS NOT POSSIBLE HERE, measured: the label is a text node
+    // with no element children and no token span, so no highlighted run reached the
+    // bubble. The command line in the CARD is still highlighted — that is pinned
+    // further down — and this is where the two halves of that asymmetry are separated.
+    expect(bubble.children, 'the bubble has element children, so markup did reach the tooltip').toEqual(['#text'])
+    expect(bubble.tokenSpans, 'a token span reached the bubble, so the tooltip IS highlighted').toBe(0)
+    // A viewport shot, NOT `fullPage`: the bubble is `position: fixed` inside the body's
+    // portal, and the picture of it alongside the numbers is the human check that the
+    // rule reads as a rule. It is taken while the pointer is still on the segment.
+    await page.screenshot({ path: SHOT.replace('.png', '-tooltip.png') })
 
     // Hovering a segment LIFTS it — the bar's own answer to the pointer, and the cue
     // it wears when the LIST points at it. Pure vertical: no segment may ever change
@@ -212,6 +684,36 @@ test.describe('the shell_progress card in a real shell', () => {
     const liftedSegment = (await segments.first().boundingBox())?.height ?? 0
     console.log(`[e2e] segment height ${String(flatSegment)} -> ${String(liftedSegment)} on hover`)
     expect(liftedSegment, 'hovering a segment did not lift it').toBeGreaterThan(flatSegment)
+
+    // The DOT grows on hover, and it grows ABOUT ITS OWN CENTRE: the growth is a
+    // transform, painted after layout, so the dot's box gets bigger while neither the
+    // marker column nor one character of the command line moves — and its centre stays
+    // exactly where it was, on the marker column and on the command's first line.
+    const dotBox = async (): Promise<{ width: number, height: number, centreX: number, centreY: number }> =>
+      await card.locator('[data-dot]').first().evaluate((element) => {
+        const box = element.getBoundingClientRect()
+        return {
+          width: box.width,
+          height: box.height,
+          centreX: box.left + box.width / 2,
+          centreY: box.top + box.height / 2,
+        }
+      })
+    await page.mouse.move(0, 0)
+    await page.waitForTimeout(150)
+    const restingDot = await dotBox()
+    await card.locator('[data-headline]').first().hover()
+    await page.waitForTimeout(200)
+    const grownDot = await dotBox()
+    console.log(`[e2e] dot on hover ${round2(restingDot.width)}x${round2(restingDot.height)} -> ${round2(grownDot.width)}x${round2(grownDot.height)}; centre ${round2(restingDot.centreX)},${round2(restingDot.centreY)} -> ${round2(grownDot.centreX)},${round2(grownDot.centreY)}; marker centre x ${round2(markerBox.centreX)}; first line centre y ${round2(firstLineCentre)}`)
+    expect(grownDot.width, 'the dot did not grow on hover').toBeGreaterThan(restingDot.width)
+    expect(grownDot.width, 'the grown dot did not stay round').toBe(grownDot.height)
+    expect(Math.abs(grownDot.centreX - restingDot.centreX), 'the dot grew away from its own centre on x').toBeLessThan(0.5)
+    expect(Math.abs(grownDot.centreY - restingDot.centreY), 'the dot grew away from its own centre on y').toBeLessThan(0.5)
+    // ...and the grown dot is where the caret was: still on the marker column, still on
+    // the first line of the command.
+    expect(Math.abs(grownDot.centreX - markerBox.centreX), 'the grown dot left the marker column').toBeLessThan(1)
+    expect(Math.abs(grownDot.centreY - firstLineCentre), 'the grown dot left the first line').toBeLessThan(1)
 
     // The command and its time must render in the SAME face: they are one line of
     // terminal text, and a different font for the clock makes it read as a separate
@@ -243,24 +745,10 @@ test.describe('the shell_progress card in a real shell', () => {
       'the token colours are not the theme\'s --shiki-* properties',
     ).toBe(true)
 
-    // The hover fill is a THEME TOKEN, not a fixed colour — the theme defines it
-    // twice (`#2631480f` for light, `#ffffff14` for dark). So flipping the shell's
-    // own dark-theme attribute must change what the row actually PAINTS: that is
-    // the difference between reading the token list and knowing it applies.
-    const darkBackground = await page.evaluate(() => {
-      document.body.setAttribute('data-ds-dark-theme', '')
-      const row = document.querySelector('[data-headline]')
-      const value = row === null || row === undefined ? '' : getComputedStyle(row).backgroundColor
-      document.body.removeAttribute('data-ds-dark-theme')
-      return value
-    })
-    console.log(`[e2e] hover bg light ${afterBackground} vs dark ${darkBackground}`)
-    expect(darkBackground, 'the hover fill does not follow the theme').not.toBe(afterBackground)
-    expect(darkBackground, 'the dark-theme fill is not a light tint').toMatch(/^rgba\(255, 255, 255/)
-
-    // The link is TWO-WAY: pointing at a LINE lights its segment. The gutter the
-    // highlight needs is carried by EVERY row (`margin: 0 -6px` cancelling
-    // `padding: 1px 6px`), so the text must still not have moved for that either.
+    // The link is TWO-WAY: pointing at a LINE lights its segment, which is the half
+    // of the relationship that replaced the old hover fill (there is no fill left in
+    // either theme — see the block above). The gutter the highlight needs is carried by
+    // EVERY row, so the text must not have moved for that either.
     const firstSegment = segments.first()
     const linkedState = async (): Promise<string | null> => await firstSegment.getAttribute('data-linked')
     // Park the pointer first: the segment hovered above is still linked, and that
@@ -318,12 +806,13 @@ test.describe('the shell_progress card in a real shell', () => {
         expect(Math.abs(seam - 1), `a seam is ${String(seam)} device px at dpr ${String(ratio)}`).toBeLessThan(0.05)
       }
     }
-    // grows taller, the row takes the background fill. Starting from the LINE this
-    // time, so the bar side is reached through the link rather than the pointer.
+    // The link runs the OTHER way too: pointing at a LINE lifts its segment — the
+    // bar's own answer to the pointer, reached this time from the list side. Pure
+    // vertical, and it moves no text.
     const segmentHeight = async (): Promise<number> => (await firstSegment.boundingBox())?.height ?? 0
     const beforeRowHover = await codeLeft()
     const beforeLinkedHeight = await segmentHeight()
-    await firstRow.hover()
+    await firstStep.hover()
     await page.waitForTimeout(150)
     const afterRowHover = await codeLeft()
     const afterLinkedHeight = await segmentHeight()
@@ -332,62 +821,29 @@ test.describe('the shell_progress card in a real shell', () => {
     expect(afterLinkedHeight, 'hovering a line did not lift its segment').toBeGreaterThan(beforeLinkedHeight)
     expect(afterRowHover, 'the row gutter moved the command text').toBe(beforeRowHover)
 
-    // The list is a TREE. Every node starts CLOSED, its marker opens exactly that
-    // node's output child, and the marker turns to point down while it is open. The
-    // marker is a DRAWN triangle, so its state is its transform, not its text.
-    const toggle = card.locator('[data-toggle]').first()
-    const node = toggle.locator('../..') // marker -> command line -> node
-    const childCount = async (): Promise<number> => await node.locator('[data-output]').count()
-    const caretAngle = async (): Promise<string> =>
-      await toggle.locator('span').first().evaluate((element) => getComputedStyle(element).transform)
-    expect(await caretAngle(), 'a closed node does not start with a right-pointing triangle').toBe('none')
-    expect(await childCount(), 'a node shows its child before being opened').toBe(0)
-    await toggle.click()
-    await page.waitForTimeout(120)
-    expect(await caretAngle(), 'the triangle did not turn to point down').toContain('matrix')
-    expect(await childCount(), 'opening the marker did not reveal the child').toBe(1)
-    await toggle.click()
-    await page.waitForTimeout(120)
-    expect(await caretAngle(), 'the triangle did not turn back').toBe('none')
-    expect(await childCount(), 'closing the marker did not hide the child again').toBe(0)
-
-    // Three things a wrapped command used to get wrong, all measured rather than eyeballed.
-    //
-    // 1. The caret column is an ABSOLUTE width. It was `ch`, and `ch` resolves against the
-    //    element's OWN font — the toggle is a `<button>`, which does not inherit the page
-    //    font — so the button and the spacer came out different widths and a command's
-    //    left edge moved depending on whether its node had a caret.
-    // 2. Every command starts at the same x, caret or no caret.
-    // 3. The caret is centred on the FIRST LINE, not on the whole command, so a wrapped
-    //    command does not leave it floating beside the last line.
-    const marker = await card.locator('[data-toggle]').first().evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      return { width: getComputedStyle(element).width, centre: rect.top + rect.height / 2 }
-    })
+    // Every command starts at the same x, marker or no marker, because the marker
+    // column is an ABSOLUTE 8px and never `ch` — `ch` resolves against the
+    // element's OWN font, so the column would depend on which element measured it.
+    // (The marker box and the dot's centring are measured in the new-contract block
+    // above; this keeps the column-consistency half of the old wrapped-command pin.)
     const codeEdges = await card.locator('[data-code]').evaluateAll((nodes) =>
       nodes.map((node) => node.getBoundingClientRect().x))
-    const firstLineCentre = await card.locator('[data-code]').first().evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      return rect.top + Number.parseFloat(getComputedStyle(element).lineHeight) / 2
-    })
     const edgeSpread = Math.max(...codeEdges) - Math.min(...codeEdges)
-    console.log(`[e2e] marker width ${marker.width}; command left edge spread ${String(edgeSpread.toFixed(2))}px; caret centre ${marker.centre.toFixed(2)} vs first line centre ${firstLineCentre.toFixed(2)}`)
+    console.log(`[e2e] command left edge spread ${String(edgeSpread.toFixed(2))}px across ${String(codeEdges.length)} rows`)
     expect(codeEdges.length, 'no command line rendered, so nothing was measured').toBeGreaterThan(1)
-    expect(marker.width, 'the caret column is not the marker width').toBe('8px')
     expect(edgeSpread, 'commands do not all start at the same x').toBeLessThan(0.5)
-    expect(Math.abs(marker.centre - firstLineCentre), 'the caret is not centred on the first line').toBeLessThan(1)
 
-    // The bar no longer navigates: its segments are for READING progress, so a click on
-    // one must leave the tree exactly as it was. Scoped to `[data-step]`, because the
-    // shell's OWN expanded header row also carries a `data-open` attribute — matching it
-    // would have made this assertion compare 1 with 1 and prove nothing.
-    const openNodes = async (): Promise<number> => await card.locator('[data-step][data-open]').count()
-    const openBefore = await openNodes()
+    // The bar no longer navigates, and there is nothing left for it to navigate: the
+    // list has no collapse state at all, so a click on a segment must leave every
+    // output block exactly where it was. (No toggle, no triangle and no `>` are
+    // asserted against the whole card in the new-contract block above.)
+    const outputCount = async (): Promise<number> => await card.locator('[data-output]').count()
+    const outputBefore = await outputCount()
     await segments.nth(2).click()
     await page.waitForTimeout(200)
-    console.log(`[e2e] tree open nodes ${String(openBefore)} -> ${String(await openNodes())} after a segment click`)
-    expect(openBefore, 'the tree was not back to all-closed before the click').toBe(0)
-    expect(await openNodes(), 'clicking a segment changed the tree').toBe(0)
+    console.log(`[e2e] segment click -> output blocks ${String(outputBefore)} -> ${String(await outputCount())}; toggles ${String(await card.locator('[data-toggle]').count())}`)
+    expect(await outputCount(), 'clicking a segment changed what the list shows').toBe(outputBefore)
+    expect(await card.locator('[data-toggle]').count(), 'a segment click revealed a toggle').toBe(0)
 
     // The RUNNING arm, in a real browser.
     //
