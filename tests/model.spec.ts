@@ -16,9 +16,16 @@ import type { LiveSnapshot, ShellProgressMeta } from '../src/types.ts'
 // the only inputs these builders take are host data.
 
 describe('barShape', () => {
-  it('draws nothing for a single step', () => {
+  it('draws nothing only when nothing is known', () => {
+    // Zero steps is the moment before the host has answered — nothing to draw yet.
     expect(barShape(0)).toBe('none')
-    expect(barShape(1)).toBe('none')
+  })
+
+  it('gives a single-line command ONE segment', () => {
+    // One step is a real command with a real segment: it shows pending → running →
+    // done, with the command's clock beside it. This used to be 'none', which left a
+    // single-line card with a counter and no bar at all.
+    expect(barShape(1)).toBe('segments')
   })
 
   it('segments a normal command', () => {
@@ -210,6 +217,11 @@ describe('viewFromSettled', () => {
     expect(view.refused).toBe(false)
     expect(view.instrumented).toBe(false)
     expect(view.total).toBe(1)
+    // ...and it gets a bar with its one segment, finished: the counter reads 1/1 and
+    // the segment is `done`, which is what a one-line command's card must show.
+    expect(view.bar).toBe('segments')
+    expect(view.steps.map((step) => step.phase)).toEqual(['done'])
+    expect(view.done).toBe(1)
   })
 })
 

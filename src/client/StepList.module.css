@@ -163,12 +163,14 @@
   background-color: var(--step-state-error, currentColor);
 }
 
-/* A step that has not started is dimmer than the ones that have: the list is a record
- * of what RAN, and the lines still waiting are context rather than content. Applied to
- * the command line rather than the whole node so the state dot keeps its weight. */
-.row[data-phase='pending'] .headline {
-  opacity: 0.5;
-}
+/* A step that has not run yet keeps its command line at FULL strength, exactly like the
+ * ones that have. The line used to be faded to 50% here, on the reasoning that the list
+ * is a record of what RAN — but a command the reader is about to watch run is content,
+ * not context, and half-strength text reads as "disabled" rather than "still to come".
+ *
+ * What stays is the STATE, carried by the things that are supposed to carry it: the dot
+ * (`.dot`, at `--step-alpha-pending`) and the bar's segment (`.segment[data-phase=
+ * 'pending']`). The command text is not a state indicator, so it does not change. */
 
 /* Both of these are `<pre>` elements, and `<pre>` carries a user-agent
  * `font-family: monospace`. An element's OWN rule beats an INHERITED value, so the

@@ -105,6 +105,25 @@ export class StepTracker {
     if (state !== undefined && state.endedAt === null) state.endedAt = this.now()
   }
 
+  /**
+   * Begin the ONE step of a run that cannot announce itself.
+   *
+   * A single-line command is never instrumented — there is no order to keep, so no
+   * marker is written — and that left its only step with no `startedAt` at all. The
+   * card then had nothing to colour: its step could only ever read "pending", its
+   * counter `0/1` even on a finished command, and the bar drew no segment to say
+   * otherwise (`barShape` suppressed one step). This stamps the step the run begins
+   * with, and {@link settle} closes it, so the one segment runs pending → running →
+   * done like any other.
+   *
+   * A no-op unless the run has exactly one step: with more than one, the markers are
+   * what say which is running, and guessing the first would be a lie.
+   */
+  beginSoleStep(): void {
+    const only = this.states.length === 1 ? this.states[0] : undefined
+    if (only !== undefined) this.mark(only.line)
+  }
+
   /** Output produced before the first marker. */
   preamble(): string {
     return joinLines(this.preambleLines)

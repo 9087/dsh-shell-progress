@@ -424,6 +424,11 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // The hover FILL is gone — in both themes, which means the theme's interactive
     // fill token is gone from this plugin's stylesheets entirely.
     expect(css, 'the row still paints the theme\'s hover fill').not.toContain('--dsw-alias-interactive-bg-hover')
+    // A command line still WAITING its turn is not faded either: the pending state is the
+    // dot's colour and the bar's segment, and the text is not a state indicator. The rule
+    // that dimmed it is gone from the shipped stylesheet, which is the half a browser
+    // cannot be asked about from here (the e2e measures the other half).
+    expect(css, 'a pending row still fades its command line').not.toMatch(/_headline\{[^}]*opacity/u)
     // NO divider in the card body. The hairline that used to sit above the output is
     // gone — the CARD carries that divider instead, pinned in the hover-card tests
     // below — and so is the output block's own top border, so the removal is a removal
@@ -623,6 +628,9 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(html).not.toContain('row.notInstrumented')
     // It is still a card with its own counter; it just has nothing to warn about.
     expect(html).toContain('row.counter')
+    // AND it draws its bar. One step is ONE segment, not none: a single-line command
+    // used to get a counter and no bar at all, which is the shape this pins.
+    expect((html.match(/data-phase="/g) ?? []), 'the single-step card drew no segment').toHaveLength(1)
   })
 
   // The pin for C-6. The browser cannot run a parser, so a bar drawn before the

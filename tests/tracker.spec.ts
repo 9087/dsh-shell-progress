@@ -112,6 +112,34 @@ describe('StepTracker timing', () => {
   })
 })
 
+describe('StepTracker sole step', () => {
+  /** The one step of a run that was NOT instrumented — a single-line command. */
+  const SOLE: readonly Step[] = [{ line: 1, text: "Write-Output 'one'" }]
+
+  it('gives the only step of an uninstrumented run a start and an end', () => {
+    // Without this the step has no timestamps at all: the card's single segment could
+    // only ever read "pending" and its counter `0/1`, even on a finished command.
+    const { tracker, advance } = trackerOnClock(SOLE)
+    tracker.beginSoleStep()
+    expect(tracker.current()).toBe(1)
+    advance(1_500)
+    expect(tracker.elapsed(1_500)).toBe(1_500)
+    tracker.settle()
+    const steps = tracker.steps()
+    expect(steps[0]?.startedAt).toBe(0)
+    expect(steps[0]?.endedAt).toBe(1_500)
+  })
+
+  it('is a no-op when the run has more than one step', () => {
+    // With several steps the MARKERS say which is running; stamping the first would be
+    // a guess, and a wrong one for every step after it.
+    const { tracker } = trackerOnClock()
+    tracker.beginSoleStep()
+    expect(tracker.current()).toBeNull()
+    expect(tracker.steps().every((step) => step.startedAt === null)).toBe(true)
+  })
+})
+
 describe('StepTracker output budget', () => {
   it('drops output past the per-step budget and says so', () => {
     const { tracker } = trackerOnClock(STEPS, 10)

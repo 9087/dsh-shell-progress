@@ -51,11 +51,18 @@ export type BarShape = 'segments' | 'solid' | 'none'
  * yet, so a duration-proportional layout would jump around and degenerate into
  * a flame chart. Past {@link MAX_SEGMENTS} a segment is too thin to read (or
  * to hover), so the bar degrades to a single fill meaning "how far along".
+ *
+ * ONE step is one SEGMENT, not "no bar". A single-line command has exactly one
+ * step, and the one segment still answers what the card is for: it is pending,
+ * then running with the command's clock beside it, then done — and its hover card
+ * carries that command and its output like any other segment's. Only ZERO steps
+ * draws nothing, because there is nothing to draw: that is the moment before the
+ * host has answered, and a bar then would be a guess.
  * @param total - number of top-level steps.
  * @returns the bar's shape.
  */
 export function barShape(total: number): BarShape {
-  if (total <= 1) return 'none'
+  if (total < 1) return 'none'
   if (total > MAX_SEGMENTS) return 'solid'
   return 'segments'
 }

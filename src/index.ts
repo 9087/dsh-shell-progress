@@ -501,6 +501,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         live.set(exec.callId, entry)
         prune(created)
 
+        // A single-line command is NOT instrumented — there is no order to keep, so no
+        // marker is ever written — and nothing else would give its one step a start
+        // time. Without this the card had no segment to draw (`barShape` suppressed a
+        // one-step bar) and nothing to colour if it had: the step could only read
+        // "pending" and the counter `0/1` even after the command finished.
+        if (!instrumented && split.steps.length === 1) entry.tracker.beginSoleStep()
+
         let execution
         try {
           execution = await ctx.shell.execute(ctx.shell.resolve(request))
