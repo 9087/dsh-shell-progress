@@ -169,6 +169,15 @@ export interface PlanOptions {
   readonly executable?: string
   /** How long the probe may run, ms. Defaults to {@link PROBE_TIMEOUT_MS}. */
   readonly timeoutMs?: number
+  /**
+   * The platform whose candidate list resolution walks; defaults to this process's.
+   *
+   * A seam like the others, and the one that makes "there is no PowerShell at all"
+   * expressible on a host that has one: the POSIX candidate list ends in a bare `pwsh`,
+   * which has no path to test and is handed to the SPAWN — so on POSIX the unresolvable
+   * case is a failed spawn, and the empty-resolver answer is Windows-only.
+   */
+  readonly platform?: NodeJS.Platform
 }
 
 /**
@@ -212,7 +221,7 @@ export async function planPwshSteps(command: string, options: PlanOptions = {}):
   // Parsing a command we will not instrument buys nothing but a process spawn.
   if (!heuristic.safe) return undefined
   if (!/[\r\n]/.test(command)) return undefined
-  const executable = options.executable ?? resolvePowershell(options.env ?? process.env)
+  const executable = options.executable ?? resolvePowershell(options.env ?? process.env, options.platform ?? process.platform)
   if (executable === undefined) return undefined
   const probe = buildProbeSource(command)
   if (probe.length > MAX_PROBE_CHARS) return undefined

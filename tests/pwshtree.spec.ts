@@ -211,10 +211,20 @@ describe('planPwshSteps does not spawn when it cannot help', () => {
   })
 
   it('gives no plan when no PowerShell can be resolved', async () => {
-    // An environment in which nothing on the candidate list exists, on every
-    // host: resolution fails, so there is nothing to spawn.
+    // Two ways to have no shell, and neither may fall back to a guess.
+    //
+    // 1. The RESOLVER answers nothing. That answer exists only where the candidate list
+    //    has no untestable entry: on Windows an environment whose candidates are all
+    //    absent or non-existent, which is what this fixture is. (The list is built per
+    //    platform, so the platform is part of the fixture; `tests/pwsh-path.spec.ts` pins
+    //    both lists on either host, deterministically.)
     const env = { SystemRoot: 'C:\\__dsh_absent__', ProgramFiles: 'C:\\__dsh_absent__', PATH: '' }
-    expect(await planPwshSteps(IF_ELSE, { env })).toBeUndefined()
+    expect(await planPwshSteps(IF_ELSE, { env, platform: 'win32' })).toBeUndefined()
+    // 2. The SPAWN fails, which is the shape this takes on POSIX: there the last candidate
+    //    is a bare `pwsh` — no path to test, handed to the spawn to resolve — so a host
+    //    that has no PowerShell fails here instead. An absolute path that cannot exist is
+    //    the same case on every host, and this is the half that runs unconditionally.
+    expect(await planPwshSteps(IF_ELSE, { executable: '/__dsh_absent__/pwsh' })).toBeUndefined()
   })
 })
 
