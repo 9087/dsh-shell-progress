@@ -23,6 +23,23 @@ Change a source file with the `edit`/`write` tools. A round trip through
 that is how a UTF-8 file ends up with `?` where an em dash was, and how a
 newline gets glued onto the wrong line.
 
+## A UI change refreshes both README figures
+
+`docs/assets/running.png` (English, used by `README.md`) and
+`docs/assets/running.zh.png` (Chinese, used by `README.zh.md`) are committed
+photographs of the card, produced by `pnpm run e2e`. So a change to what the card
+LOOKS like is not finished until the suite has been re-run and both images
+committed. Nothing else checks them: a stale pair goes on making a claim about the
+UI that stopped being true, while the build, the type checker and every test stay
+green.
+
+Each figure is shot against its own host. The card's title is the SHELL's own text,
+and the language comes from that host's stored `locale.preference`
+(`makeFixture(tag, locale)`) — never from the browser, whose locale is only
+provisional and is replaced once the plugin activates. Shooting both languages from
+one host is therefore a race, not a configuration; `captureFigure` waits for the
+expected title before the shutter for the same reason.
+
 ## The two invariants
 
 1. **The step marker stays inlined.** `src/instrument.ts` explains why. The

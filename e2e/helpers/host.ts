@@ -216,8 +216,17 @@ export interface Fixture {
   cleanup(): void
 }
 
-/** Create the temporary home/workspace pair this suite owns. */
-export function makeFixture(tag: string): Fixture {
+/**
+ * Create the temporary home/workspace pair this suite owns.
+ * @param tag - names the temporary directory, so two fixtures in one file cannot collide.
+ * @param locale - the STORED `locale.preference` for this home. It is written into the
+ *   host's own settings document because that value is the AUTHORITATIVE language: the
+ *   language the client derives from the browser is only provisional, and the stored
+ *   preference REPLACES it once the plugin activates (`dsh-client-locale`). A screenshot
+ *   therefore cannot be taken in a language by setting the browser's — it needs a home
+ *   that says so.
+ */
+export function makeFixture(tag: string, locale: 'zh' | 'en' = 'zh'): Fixture {
   const home = join(tmpdir(), `dsh-shell-progress-e2e-${tag}-${randomUUID().slice(0, 8)}`)
   const workspace = join(home, 'workspace')
   mkdirSync(workspace, { recursive: true })
@@ -226,7 +235,7 @@ export function makeFixture(tag: string): Fixture {
   // opens: it is a modal over a mask, and a modal the browser cannot dismiss
   // makes every later click land on the mask instead of the page. It is a
   // placeholder — this suite never calls a model.
-  writeFileSync(join(home, 'settings.yaml'), 'locale:\n  preference: zh\n')
+  writeFileSync(join(home, 'settings.yaml'), `locale:\n  preference: ${locale}\n`)
   writeFileSync(join(home, '.credentials.yaml'), 'version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-e2e-placeholder-not-a-real-key\n')
   return {
     home,

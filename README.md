@@ -1,22 +1,39 @@
 # dsh-shell-progress
 
+English | [中文](https://github.com/9087/dsh-shell-progress/blob/main/README.zh.md)
+
+<!-- Badges. `ci.yml` and `harness-matrix.yml` both run on `main`, so their badges
+     track it. `release.yml` is TAG-triggered and has no status on a branch — a
+     branch badge for it renders "no status" — so its badge is pinned to a tag and
+     `?branch=v0.2.0` below must be bumped with each release. -->
+[![npm](https://img.shields.io/npm/v/dsh-shell-progress)](https://www.npmjs.com/package/dsh-shell-progress)
+[![license](https://img.shields.io/npm/l/dsh-shell-progress)](https://github.com/9087/dsh-shell-progress/blob/main/LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D20.11-339933)](https://github.com/9087/dsh-shell-progress/blob/main/package.json)
+[![CI](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml)
+[![Harness matrix](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml)
+[![Release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.2.0)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
+
 A DeepSeek Harness plugin that shows **where a multi-step shell command is right
 now**, as a segmented progress bar inside the tool-call card.
 
-One call, one card:
+One call, one card — photographed mid-run, not drawn by hand:
 
-```
-┌──────────────────────────────────────────────────┐
-│ Shell progress · 构建并运行测试          2/7     │
-│ [████|████|▓▓▓|    |    |    |    ]  ▶ 47s      │   ← 收起态就有
-├──────────────────────────────────────────────────┤
-│  ● 1   $total = 0                                │
-│  ● 2   if ($true) {                              │   ← 展开后：
-│  ▶ 3     Write-Output "adding $n"                │      每步代码 + 该步输出
-│        → adding 1                                │
-│  ○ 4   Write-Output "done"                       │
-└──────────────────────────────────────────────────┘
-```
+<!-- Absolute, not `docs/assets/running.png`: npmjs.com renders only the README it
+     snapshotted at publish time and does not serve the repository tree, so a relative
+     path shows a broken image there. The file still lives in the repo, and
+     `pnpm run e2e` rewrites it, so this URL follows the code. -->
+![The card while a four-step command runs: a partly filled segmented bar with the step in flight and its clock, the finished step's output beneath it, and the steps still to come](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.png)
+
+*The real card, expanded, with `1/4` done and step 2 in flight. The picture is taken and
+cropped by `pnpm run e2e` (see `docs/assets/`), so it cannot drift from the code it
+documents — re-running the suite rewrites it, and the clock inside reads whatever the
+step had reached at that instant.*
+
+A Chinese rendering of the same card, for the `*.zh.*` convention a `README.zh.md` would
+use, lives beside it as [`docs/assets/running.zh.png`](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.zh.png). Both
+come out of the same run: the card's title is the shell's own text, so each figure is shot
+against a host whose STORED `locale.preference` says which language to draw — the client's
+browser-derived language is only provisional and that preference replaces it.
 
 The question it answers is *"is this command still working, or is it stuck?"* —
 so the live position is the feature, not a bonus. The bar lives in the
@@ -110,15 +127,18 @@ difference, so a future refactor into a helper fails the suite.
 
 ## When it does not track
 
-The command runs **unmodified**, and the card degrades to "how many steps"
-without a live position, when any of these hold:
+The command runs **unmodified** — and no marker is written — when any of these hold:
 
 - the splitter meets something it cannot decide (unterminated quote, block
   comment, here-string, line continuation, unbalanced braces or parentheses);
-- the command has one step or fewer;
 - the command already contains a step-marker shape, or already uses `$__ok`;
 - the resolved sandbox mode is `read-only`;
 - the command splits into more than `maxSteps` steps.
+
+A command with **one step** is uninstrumented too — there is no order to keep, so there
+is nothing to mark — but its card is not degraded: the host stamps that step's own start
+and end, so the bar draws its single segment and it goes pending → running → done with
+the command's clock beside it.
 
 None of these is an error: the model gets exactly what `pwsh` would have given.
 
@@ -134,9 +154,9 @@ The two halves share `src/types.ts` and `src/split.ts` and nothing else.
 **The live channel is a poll, not a push.** A plugin installed outside the DSH
 tree cannot receive host events — the forwarded-event allowlist is a static
 array inside the DSH build — so the browser polls `/shell-progress` (an
-authenticated request/response channel this plugin owns) about half a second
-apart while a call is in flight. The settled state never needs the poll: it is
-already in the session log.
+authenticated request/response channel this plugin owns) every 250ms — the
+store's default cadence — while a call is in flight. The settled state never
+needs the poll: it is already in the session log.
 
 ## Development
 
@@ -146,6 +166,14 @@ pnpm run typecheck
 pnpm test
 pnpm run build
 ```
+
+The three workflow badges at the top are these:
+
+| Workflow | What it does |
+|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | Typechecks, builds and runs the unit suite against the harness versions pinned in `devDependencies` — ONE host version, the one this repository declares. |
+| [`harness-matrix.yml`](.github/workflows/harness-matrix.yml) | Re-runs the three suites that cross the plugin/host seam (the registered tool driven through `apply`, the pwsh planner, the bash planner) once per published harness version — the only real answer to "will this still work after the host upgrades". A version inside the declared peer range blocks the build; the newest published version rides along as a non-blocking probe. |
+| [`release.yml`](.github/workflows/release.yml) | On a `v*` tag: the same gate, then `npm publish --provenance` through Trusted Publishing (OIDC — no token anywhere), then a GitHub Release. |
 
 See [DEVELOP.md](DEVELOP.md) and [PUBLISH.md](PUBLISH.md).
 

@@ -120,11 +120,36 @@ cycle if forgotten:
   only honours it for a session that is not `blank` — which only `turn/start`
   clears.
 
-Screenshots land in `test-results/` (`shell-progress-card.png`, plus an
-`-expanded` variant). That is the point of the suite: "does this look like the
-shell's own row?" is a question about pixels, and two real bugs — a bar collapsed
-to zero width and a chevron on the wrong side — were invisible to every unit test
-and obvious in one screenshot.
+Screenshots land in `test-results/` (`shell-progress-card.png`, plus `-expanded`,
+`-running` and `-hover-card` variants). That is the point of the suite: "does this
+look like the shell's own row?" is a question about pixels, and two real bugs — a
+bar collapsed to zero width and a chevron on the wrong side — were invisible to
+every unit test and obvious in one screenshot.
+
+### The two committed figures, and the duty that comes with them
+
+The same run also writes the only images the repository tracks, each CROPPED to the
+card itself:
+
+| File | Language | Shown by |
+|---|---|---|
+| `docs/assets/running.png` | English | `README.md` |
+| `docs/assets/running.zh.png` | Chinese | `README.zh.md` |
+
+**A UI change is not finished until both are regenerated**: run `pnpm run e2e` and
+commit the two images it rewrites. They are photographs, so a stale pair keeps
+asserting something about the card that stopped being true — and nothing catches it:
+the build, the type checker and every test stay green while both READMEs display the
+old pixels.
+
+Each figure is shot against its OWN host, because the card's title is the shell's own
+text and the language comes from that host's stored `locale.preference`
+(`makeFixture(tag, locale)`), never from the browser: the client's browser-derived
+language is provisional and is replaced once the plugin activates. That is why an
+`en-US` browser context produced an English figure on one run and a Chinese one on the
+next. The capture waits for the title it expects (`toContainText`) before the shutter,
+and takes the shot in its own context at `README_FIGURE_WIDTH`, so neither the wait nor
+the narrow viewport can disturb the measurements the rest of the file makes.
 
 The last one skips itself when no `pwsh` can be spawned, so a sandbox boundary
 reads as a skip rather than a false failure.
