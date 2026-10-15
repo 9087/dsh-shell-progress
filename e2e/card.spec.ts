@@ -392,25 +392,25 @@ test.describe('the shell_progress card in a real shell', () => {
     // The RUNNING arm, in a real browser.
     //
     // Its LIVE numbers need a real call, which this fixture cannot produce: a
-    // running call has no host record to answer for. What it can pin is the shape
-    // — a call in flight renders the PLANNED structure (one segment per step,
-    // every one pending) rather than nothing at all — plus the absence of the
-    // temporary probe line, so a debugging aid cannot quietly ship.
+    // running call has no host record to answer for. What it pins is the ABSENCE
+    // of a guess. The browser cannot run a parser, so before the host answers
+    // there must be no bar and no segments at all — the card shows its own row
+    // and waits for data. (It used to draw one pending segment per line of a
+    // client-side heuristic split here, which is the guess C-6 removed.)
     const running = page.locator(`[data-chat-call-id="${RUNNING_CALL}"]`)
     await expect(running, 'the fixture never rendered a running card').toBeAttached({ timeout: 60_000 })
     await revealCard(running)
     await page.waitForTimeout(2_000)
     await page.screenshot({ path: SHOT.replace('.png', '-running.png'), fullPage: true })
     const planned = await running.evaluate((node) => ({
+      bars: node.querySelectorAll('[role="progressbar"]').length,
       phases: [...node.querySelectorAll('[data-phase]')].map((segment) => segment.getAttribute('data-phase')),
       text: (node.textContent ?? '').replace(/\s+/g, ' '),
     }))
     console.log(`[e2e] running ${JSON.stringify(planned)}`)
-    // One segment per step, drawn before a single marker has arrived.
-    expect(planned.phases, `the running card drew ${String(planned.phases.length)} segments`).toHaveLength(4)
-    expect(planned.phases.every((phase) => phase === 'pending')).toBe(true)
-    // The temporary probe line is gone from a shipped card.
-    expect(planned.text).not.toContain('DBG')
+    // Nothing measured, because nothing was guessed: no bar, no segments.
+    expect(planned.bars, `the running card drew a bar before the host answered:\n${planned.text}`).toBe(0)
+    expect(planned.phases, `the running card drew ${String(planned.phases.length)} guessed segments`).toHaveLength(0)
   })
 })
 

@@ -3,6 +3,9 @@
   "version": "0.1.1",
   "description": "DeepSeek Harness plugin: a segmented progress bar for multi-step PowerShell tool calls",
   "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=20.11"
+  },
   "author": "Wu Zhiwei",
   "repository": {
     "type": "git",
@@ -31,6 +34,8 @@
     "lib/index.js",
     "lib/client.js",
     "lib/types/**/*.d.ts",
+    "vendor/tree-sitter-bash.wasm",
+    "vendor/README.md",
     "cordis.patch.yml"
   ],
   "dsh": {
@@ -55,19 +60,31 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@shikijs/langs": "^4.5.0",
+    "shiki": "^4.5.0",
+    "web-tree-sitter": "^0.27.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-sandbox": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-llm": { "optional": true },
+    "@deepseek-ai/dsh-sandbox": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true },
+    "@deepseek-ai/schemastery": { "optional": true }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
     "@deepseek-ai/dsh-sandbox": "0.2.0-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
-    "@shikijs/langs": "^4.5.0",
-    "shiki": "^4.5.0"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.1",
-    "react": "^18.2.0"
-  },
-  "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",

@@ -19,7 +19,8 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { instrumentBash, splitBash } from '../src/bash.ts'
+import { instrumentBash, inlineMarkerBash, splitBash } from '../src/bash.ts'
+import { planBashSteps } from '../src/bashtree.ts'
 import { createNonce, markerPattern, stripMarkers } from '../src/instrument.ts'
 import { resolveBash } from './bash-path.ts'
 
@@ -194,4 +195,123 @@ describe.skipIf(!available)('the splitter refuses what it cannot decide', () => 
       expect(split.reason).toBeTypeOf('string')
     })
   }
+})
+
+/**
+ * Tree-sitter's leniency, measured against a real bash.
+ *
+ * The grammar accepts a few constructs real bash rejects and reports
+ * `hasError === false` for them, so the PLANNER instruments a command that a
+ * real interpreter will refuse. The claim being tested is that this cannot
+ * change how the command FAILS: a marker is a separate statement prepended to a
+ * step's own line, so it can neither repair a syntax error nor create one.
+ *
+ * Both requested probes are here, and the two of them turned out to be
+ * different cases — which is why each is pinned separately:
+ *
+ * - a bare `}` on its own line: the grammar does NOT see an error, the
+ *   heuristic does (the first word is a block keyword it cannot track), so the
+ *   PLAN is what instruments it.
+ * - `echo >` with no redirection target: the grammar DOES see an error, so the
+ *   plan REFUSES the command and production runs it unmodified. The probe puts
+ *   a marker on it from the heuristic anyway — the only way to measure the
+ *   claim on a command tree-sitter rejects.
+ *
+ * The stderr assertion is exact rather than approximate: bash names the line it
+ * choked on and ECHOES that line, and the echoed line is the instrumented one,
+ * so the raw stderr differs by exactly the inlined marker. Removing that marker
+ * from the echo (and nothing else) must reproduce the plain stderr byte for
+ * byte, which is what is asserted. A command with no syntax error never echoes
+ * anything, which is why the other suites can compare raw stderr.
+ */
+describe.skipIf(!available)('tree-sitter\'s leniency cannot change how a command fails', () => {
+  /**
+   * Rebuild the plain stderr out of the instrumented one.
+   *
+   * Only a syntax error reaches this: bash echoes the offending source line, and
+   * `instrumentBash` prepends the inlined marker to exactly that line.
+   * @param text - the instrumented run's stderr.
+   * @param nonce - this call's nonce, which names the marker.
+   * @param line - the step line that failed.
+   * @returns the stderr with the inlined marker taken back out.
+   */
+  function withoutInlinedMarker(text: string, nonce: string, line: number): string {
+    return text
+      .split('\n')
+      .map((entry) => entry.replace(`${inlineMarkerBash(nonce, line)}; `, ''))
+      .join('\n')
+  }
+
+  it('keeps a stray `}` failing identically, even though the PLAN instruments it', async () => {
+    const command = ['echo before', '}'].join('\n')
+    // The heuristic refuses it — `}` is a block keyword it cannot find the
+    // start of — but the parser does not. That gap IS the leniency.
+    expect(splitBash(command).safe).toBe(false)
+    const plan = await planBashSteps(command)
+    expect(plan?.safe).toBe(true)
+    expect(plan?.steps.map((step) => step.line)).toEqual([1, 2])
+
+    const nonce = createNonce()
+    const instrumented = instrumentBash(command, plan?.steps ?? [], nonce)
+    const plain = await bash(command)
+    const marked = await bash(instrumented)
+
+    // Both really fail, and the first step's marker really ran before the
+    // failure — otherwise this comparison would be about nothing.
+    expect(plain.code).not.toBe(0)
+    expect(markerCount(marked.stdout, nonce)).toBe(1)
+    // Exit status and model-visible stdout are the plain run's.
+    expect(marked.code).toBe(plain.code)
+    expect(stripMarkers(marked.stdout, nonce)).toBe(plain.stdout)
+    // And the failure message is the plain one, once the echoed line's marker is
+    // taken out. The RAW stderr is NOT identical — measured, not glossed — and
+    // the only thing in it that differs is that marker.
+    expect(marked.stderr).toContain(inlineMarkerBash(nonce, 2))
+    expect(withoutInlinedMarker(marked.stderr, nonce, 2)).toBe(plain.stderr)
+  })
+
+  it('keeps `echo >` failing identically when the marker is forced onto it', async () => {
+    const command = ['echo before', 'echo >'].join('\n')
+    // The heuristic is perfectly happy with it: no brace, no keyword. This is
+    // exactly the guess that would have instrumented it without a parser.
+    const heuristic = splitBash(command)
+    expect(heuristic.safe).toBe(true)
+    expect(heuristic.steps.map((step) => step.line)).toEqual([1, 2])
+    // tree-sitter is NOT lenient here — it reports an ERROR — so the production
+    // plan refuses the command and it runs unmodified. The marker is therefore
+    // applied from the heuristic, to measure the claim on the worst case.
+    expect((await planBashSteps(command))?.safe).toBe(false)
+
+    const nonce = createNonce()
+    const instrumented = instrumentBash(command, heuristic.steps, nonce)
+    const plain = await bash(command)
+    const marked = await bash(instrumented)
+
+    expect(plain.code).not.toBe(0)
+    expect(markerCount(marked.stdout, nonce)).toBe(1)
+    expect(marked.code).toBe(plain.code)
+    expect(stripMarkers(marked.stdout, nonce)).toBe(plain.stdout)
+    expect(marked.stderr).toContain(inlineMarkerBash(nonce, 2))
+    expect(withoutInlinedMarker(marked.stderr, nonce, 2)).toBe(plain.stderr)
+  })
+
+  it('runs `echo >` unmodified, so every byte of it is the plain command\'s', async () => {
+    // What the tool path does with the command above: the plan refuses, and
+    // `resolveSplit` refuses with it, so `instrumentBash` is never applied and
+    // the bytes really are identical — stdout, exit status and stderr.
+    const command = ['echo before', 'echo >'].join('\n')
+    const plan = await planBashSteps(command)
+    expect(plan?.safe).toBe(false)
+    expect(plan?.steps).toEqual([])
+
+    const nonce = createNonce()
+    const text = plan?.safe === true ? instrumentBash(command, plan.steps, nonce) : command
+    expect(text).toBe(command)
+
+    const plain = await bash(command)
+    const refused = await bash(text)
+    expect(refused.code).toBe(plain.code)
+    expect(refused.stdout).toBe(plain.stdout)
+    expect(refused.stderr).toBe(plain.stderr)
+  })
 })

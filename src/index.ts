@@ -3,7 +3,9 @@
  *
  * The plugin adds ONE model-facing tool, `shell_progress`, which:
  *
- * 1. splits the command into top-level steps (see `./split.ts`),
+ * 1. splits the command into top-level steps (see `./split.ts`, refined by
+ *    PowerShell's own parser where a dialect can offer one — see
+ *    `./pwshtree.ts`),
  * 2. inlines a marker onto each step's own line (see `./instrument.ts` —
  *    read its header before touching the marker; making it a function call
  *    silently breaks `$?` for the instrumented command),
@@ -50,7 +52,7 @@ import { createNonce, looksInstrumented, stripMarkers } from './instrument.ts'
 import { drain, follow } from './run.ts'
 import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
-import type { Step } from './split.ts'
+import type { SplitResult, Step } from './split.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
 import type { LiveSnapshot, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
@@ -107,6 +109,8 @@ interface LiveEntry {
   tracker: StepTracker
   readonly steps: readonly Step[]
   readonly instrumented: boolean
+  /** Whether instrumentation was refused; the client's "ran unmodified" signal. */
+  readonly refused: boolean
   /** Wall-clock ms the record was created, used only for eviction. */
   readonly createdAt: number
   settled: boolean
@@ -233,6 +237,7 @@ const OUTPUT_SCHEMA = {
       properties: {
         v: { type: 'integer', required: true },
         instrumented: { type: 'boolean', required: true },
+        refused: { type: 'boolean', required: true },
         partial: { type: 'boolean', required: true },
         preamble: { type: 'string', required: true },
         steps: {
@@ -261,8 +266,10 @@ const OUTPUT_SCHEMA = {
  * @param dialect - the shell this tool drives; its reserved variable is the one
  * dialect-specific refusal in this list.
  * @param command - the model's command text.
- * @param steps - the split result's steps.
- * @param splitSafe - whether the splitter could decide the whole source.
+ * @param split - the resolved split. Its `safe` flag decides, and its OWN reason
+ * is the honest one when it has one: for a dialect with a planner that says
+ * whether the parse was unavailable or reported syntax errors, which the generic
+ * sentence below would hide.
  * @param readOnly - whether the resolved sandbox mode refuses writes.
  * @param maxSteps - the configured step ceiling.
  * @returns undefined when instrumentation is allowed, else the reason.
@@ -270,12 +277,12 @@ const OUTPUT_SCHEMA = {
 function refusalReason(
   dialect: ShellDialect,
   command: string,
-  steps: readonly Step[],
-  splitSafe: boolean,
+  split: SplitResult,
   readOnly: boolean,
   maxSteps: number,
 ): string | undefined {
-  if (!splitSafe) return 'the command holds a structure this plugin cannot split safely'
+  if (!split.safe) return split.reason ?? 'the command holds a structure this plugin cannot split safely'
+  const steps = split.steps
   if (steps.length <= 1) return 'a single-line command has no steps to show'
   if (steps.length > maxSteps) return `the command has more than ${maxSteps} steps`
   if (looksInstrumented(command)) return 'the command already contains a step-marker shape'
@@ -283,6 +290,48 @@ function refusalReason(
   if (reserved !== undefined && command.includes(reserved)) return `the command already uses ${reserved}`
   if (readOnly) return 'the sandbox mode is read-only'
   return undefined
+}
+
+/**
+ * The split to instrument with: the dialect's authoritative plan when it has
+ * one, else its own heuristic — and NEVER the heuristic for a dialect that has
+ * a planner.
+ *
+ * A dialect that ships a planner has handed "what is a top-level statement?" to
+ * that dialect's real parser, so when the planner cannot deliver a parse there is
+ * no answer left to fall back on. The heuristic is a DIFFERENT implementation of
+ * the same question, and two independent implementations cannot be shown to
+ * agree: an unconfirmed boundary is exactly the guess that can land a marker
+ * inside a block and corrupt the command. Refusing is the safe degradation — the
+ * command runs unmodified, which is always correct, merely less observable.
+ *
+ * A command with at most one safe step is not a refusal: there is no boundary to
+ * decide, so it is simply uninstrumented (and a planning probe would only buy a
+ * process spawn). That is what keeps the card's "ran unmodified" notice off an
+ * ordinary single-line command, and it is why the refusal result — whose step
+ * list is EMPTY — needs its own signal rather than a step count.
+ * @param dialect - the shell this tool drives.
+ * @param command - the model's command text.
+ * @returns the steps to instrument with, and whether instrumentation may proceed.
+ */
+async function resolveSplit(dialect: ShellDialect, command: string): Promise<SplitResult> {
+  const heuristic = dialect.split(command)
+  if (dialect.plan === undefined) return heuristic
+  if (heuristic.safe && heuristic.steps.length <= 1) return heuristic
+  let planned: SplitResult | undefined
+  try {
+    planned = await dialect.plan(command)
+  } catch {
+    // A probe that throws has no answer either: the refusal below covers it, so
+    // a planner's own failure can never turn into an instrumentation guess.
+    planned = undefined
+  }
+  if (planned !== undefined) return planned
+  return {
+    steps: [],
+    safe: false,
+    reason: `the ${dialect.id} parser did not answer, so the step boundaries are unknown`,
+  }
 }
 
 /**
@@ -332,6 +381,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         found: false,
         running: false,
         instrumented: false,
+        refused: false,
         partial: false,
         current: null,
         total: 0,
@@ -344,6 +394,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       found: true,
       running: !entry.settled,
       instrumented: entry.instrumented,
+      refused: entry.refused,
       partial: entry.lossy || entry.tracker.droppedOutput(),
       current: entry.tracker.current(),
       total: entry.steps.length,
@@ -369,7 +420,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (enabled) {
     for (const dialect of dialects) ctx.tools.register(defineTool({
       name: dialect.toolName,
-      description: 'Execute a multi-line PowerShell command (`pwsh -Command`) and return its stdout/stderr, with a per-step progress bar in the UI. Prefer this over `pwsh` whenever the command has more than one line: it runs the same shell through the same executor and returns identical output and exit markers, so nothing is lost. Use `pwsh` for single-line commands, and for `run_in_background`, which this tool does not implement. Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`.',
+      // A single shared literal used to be registered for both dialects, so bash advertised itself as
+      // PowerShell and a correction could only be made in one of the two places; `commandParamDescription`
+      // below is per-dialect for the same reason.
+      description: dialect.description,
       parameters: {
         command: {
           type: 'string',
@@ -410,9 +464,16 @@ export function apply(ctx: Context, config: Config = {}): void {
         const standing = exec.agent === undefined ? {} : { session: exec.agent.session }
         const policy = sandboxPolicy?.resolve(standing)
         const readOnly = policy?.mode === 'read-only'
-        const split = dialect.split(args.command)
-        const reason = refusalReason(dialect, args.command, split.steps, split.safe, readOnly, maxSteps)
+        const split = await resolveSplit(dialect, args.command)
+        const reason = refusalReason(dialect, args.command, split, readOnly, maxSteps)
         const instrumented = reason === undefined
+        // The client's explicit REFUSAL signal. A step count cannot carry it: a
+        // refusal is not a guess, so it plans NO steps, and a zero-step refused
+        // card would otherwise look exactly like a command with nothing to show
+        // and lose its notice. The one uninstrumented case that is not a refusal
+        // is "there was no boundary to decide" (a single safe step), which is
+        // what keeps the card quiet for an ordinary single-line command.
+        const refused = reason !== undefined && !(split.safe && split.steps.length <= 1)
         if (reason !== undefined) ctx.logger.debug(`shell-progress: running unmodified — ${reason}`)
 
         const nonce = createNonce()
@@ -432,6 +493,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           tracker: new StepTracker(split.steps, { maxStepOutputChars }),
           steps: split.steps,
           instrumented,
+          refused,
           createdAt: created,
           settled: false,
           lossy: false,
@@ -479,6 +541,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const progress: ShellProgressMeta = {
           v: META_VERSION,
           instrumented,
+          refused,
           partial: lossy || entry.tracker.droppedOutput(),
           preamble: entry.tracker.preamble(),
           // The canonical value is validated against the output schema, which

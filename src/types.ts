@@ -73,6 +73,19 @@ export interface ShellProgressMeta {
   readonly v: number
   /** False when the command ran unmodified and only step attribution is missing. */
   readonly instrumented: boolean
+  /**
+   * True when instrumentation was REFUSED for a command that had boundaries to
+   * decide — a dialect planner that could not deliver a parse, a structure the
+   * splitter cannot decide, a command already carrying a marker or the reserved
+   * variable, a read-only sandbox.
+   *
+   * This is the card's "ran unmodified" notice, and it has to be its OWN field:
+   * a refused command's step list is legitimately EMPTY (a refusal is not a
+   * guess, so no step is planned), which is why no step count can stand in for
+   * it. An ordinary single-step command is uninstrumented with `refused: false`,
+   * and its card stays quiet.
+   */
+  readonly refused: boolean
   /** True when the consumed stream lost bytes, so attribution may be incomplete. */
   readonly partial: boolean
   /** Output produced before the first step's marker. Usually empty. */
@@ -96,6 +109,8 @@ export interface LiveSnapshot {
   readonly running: boolean
   /** Whether the executed text carried step markers. */
   readonly instrumented: boolean
+  /** Whether instrumentation was refused — see {@link ShellProgressMeta.refused}. */
+  readonly refused: boolean
   /** Whether the consumed stream lost bytes. */
   readonly partial: boolean
   /** Line number of the step executing now, or null before the first marker. */

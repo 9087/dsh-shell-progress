@@ -10,6 +10,7 @@ function snapshot(overrides: Partial<LiveSnapshot> = {}): LiveSnapshot {
     found: true,
     running: true,
     instrumented: true,
+    refused: false,
     partial: false,
     current: 1,
     total: 2,

@@ -1,0 +1,105 @@
+name: Harness matrix
+
+# The only real answer to "will this still work after the host upgrades".
+#
+# `ci.yml` pins the harness packages in devDependencies, so it tests exactly ONE
+# host version — the one this repository happens to declare. This job re-runs
+# the three suites that cross the plugin/host seam (the registered tool driven
+# through `apply`, the pwsh planner, the bash planner) once per published
+# harness version, so a host-side change becomes a red job here instead of a bug
+# report from someone whose host moved.
+#
+# BLOCKING vs PROBE. The versions INSIDE the declared peer range
+# (`^0.2.0-rc.2` for @deepseek-ai/dsh-{tools,llm,sandbox}) are the ones this
+# plugin promises to support, so a failure there is this repository's problem
+# and must red the build. The newest published version is a PROBE: it may sit
+# outside the range, it is allowed to fail, and its only job is to tell us about
+# the future without turning CI red today.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      # One version failing must not cancel the others: the pins and the probe
+      # are independent facts.
+      fail-fast: false
+      matrix:
+        include:
+          # The registry as read on 2026-10-15 (`npm view <pkg> versions` and
+          # `dist-tags`): `next` = 0.2.0-rc.2, `alpha` = 0.2.1-alpha.3, `latest`
+          # = a stale 0.0.1-rc.1. 0.2.0-rc.2 is the ONLY published version that
+          # satisfies ^0.2.0-rc.2 (checked with semver 7.8.5: 0.2.0-rc.1 and
+          # 0.2.1-alpha.3 are both outside), so it is the only BLOCKING pin.
+          - harness: '0.2.0-rc.2'
+            blocking: 'true'
+          # PROBE — the newest published version, outside the peer range, and
+          # therefore NON-BLOCKING via `continue-on-error` below. It passes
+          # locally as of this commit; that is information, not a promise.
+          # Measured caveat: installing a version this young also made pnpm
+          # write its release-age exclusion (`minimumReleaseAgeExclude`) into a
+          # NEW, UNTRACKED `pnpm-workspace.yaml`. Ephemeral and harmless on a
+          # runner, and the two-manifest check below deliberately does not
+          # cover it — it is not a tracked file.
+          - harness: '0.2.1-alpha.3'
+            blocking: 'false'
+    continue-on-error: ${{ matrix.blocking != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `--no-save` is what this step wants to be, and pnpm 11 removed it:
+      #
+      #   ERR_PNPM_OPTION_NOT_SUPPORTED: The "add" command currently does not
+      #   support the no-save option
+      #
+      # `--save=false`, `--config.save=false` and `npm_config_save=false` are
+      # either refused the same way or write both files anyway (measured with
+      # pnpm 11.22.0, the version `.npmrc`/`packageManager` pin here). So the
+      # equivalent is explicit: snapshot the two manifests HERE, install, and
+      # put them back in the LAST step, which proves the restore with
+      # `git diff --exit-code`.
+      #
+      # The restore is deliberately NOT done before the build. pnpm re-installs
+      # before a `pnpm run` script (verify-deps-before-run) and that install
+      # reads the lockfile — restoring the pinned lockfile first makes it
+      # DOWNGRADE node_modules, and every matrix entry would silently re-test
+      # the pinned version. Measured, not guessed: with the restore before the
+      # build, the probe entry ran its suites against 0.2.0-rc.2.
+      - name: install the matrix harness version
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          cp package.json /tmp/matrix-package.json
+          cp pnpm-lock.yaml /tmp/matrix-pnpm-lock.yaml
+          pnpm add -D \
+            "@deepseek-ai/dsh-tools@${HARNESS}" \
+            "@deepseek-ai/dsh-llm@${HARNESS}" \
+            "@deepseek-ai/dsh-sandbox@${HARNESS}"
+      # BUILD FIRST, exactly like `ci.yml`. `pnpm run build` is also the only
+      # typecheck the host half gets against these versions (`tsc -b`), and the
+      # suites are documented as build-then-test.
+      - run: pnpm run build
+      # What is in node_modules AT THE MOMENT THE SUITES RUN, not what the
+      # install step left behind. The job is worthless if this line does not
+      # name the matrix version.
+      - name: prove which harness version the suites will use
+        run: node -p "['dsh-tools','dsh-llm','dsh-sandbox'].map((n) => n + '=' + require('./node_modules/@deepseek-ai/' + n + '/package.json').version).join(' ')"
+      - run: pnpm vitest run tests/apply.spec.ts tests/pwshtree.spec.ts tests/bashtree.spec.ts
+      # `--no-save`'s whole promise, kept explicitly and checked rather than
+      # asserted in prose. `always()` so a failed suite still leaves the
+      # checkout's manifests as it found them.
+      - name: restore the two manifests and prove they are untouched
+        if: always()
+        run: |
+          cp /tmp/matrix-package.json package.json
+          cp /tmp/matrix-pnpm-lock.yaml pnpm-lock.yaml
+          git diff --exit-code -- package.json pnpm-lock.yaml

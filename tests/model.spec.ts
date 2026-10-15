@@ -11,7 +11,9 @@ import {
 } from '../src/client/model.ts'
 import type { LiveSnapshot, ShellProgressMeta } from '../src/types.ts'
 
-const COMMAND = ['$a = 1', 'if ($true) {', '  Write-Output "x"', '}', 'Write-Output $a'].join('\n')
+// There is deliberately NO multi-line command fixture here any more: the client
+// no longer derives anything from the command text (see `./model`'s header), so
+// the only inputs these builders take are host data.
 
 describe('barShape', () => {
   it('draws nothing for a single step', () => {
@@ -46,6 +48,7 @@ describe('viewFromLive', () => {
     found: true,
     running: true,
     instrumented: true,
+    refused: false,
     partial: false,
     current: 5,
     total: 2,
@@ -59,7 +62,7 @@ describe('viewFromLive', () => {
   })
 
   it('marks the running step and the finished ones', () => {
-    const view = viewFromLive(snapshot(), COMMAND)
+    const view = viewFromLive(snapshot())
     expect(view.running).toBe(true)
     expect(view.currentIndex).toBe(1)
     expect(view.done).toBe(1)
@@ -67,27 +70,58 @@ describe('viewFromLive', () => {
   })
 
   it('reports the running step\'s elapsed time as its duration', () => {
-    const view = viewFromLive(snapshot(), COMMAND)
+    const view = viewFromLive(snapshot())
     expect(view.currentElapsedMs).toBe(3_000)
     expect(view.steps[1]?.durationMs).toBe(3_000)
     expect(view.steps[1]?.tone).toBe('normal')
   })
 
-  it('draws the planned structure when the host has no record yet', () => {
-    const view = viewFromLive(undefined, COMMAND)
+  it('draws NOTHING the command text could have suggested when the host has no record', () => {
+    // The browser cannot run a parser, so any row drawn here would be a GUESS.
+    // The card keeps its own header and says the call is live; the bar and the
+    // rows wait for the first host answer.
+    const view = viewFromLive(undefined)
+    expect(view.steps).toEqual([])
+    expect(view.total).toBe(0)
+    expect(view.bar).toBe('none')
+    // Live, though: the call IS in flight, and the header says so.
+    expect(view.running).toBe(true)
     expect(view.instrumented).toBe(false)
+    expect(view.refused).toBe(false)
     expect(view.currentIndex).toBe(-1)
-    expect(view.steps.map((step) => step.line)).toEqual([1, 2, 5])
-    expect(view.steps.every((step) => step.phase === 'pending')).toBe(true)
+  })
+
+  it('draws the host\'s rows once it answers, and a bar to go with them', () => {
+    // The pin for the whole change: NOTHING before metadata, the host's own rows
+    // after — never a heuristic split in between.
+    const before = viewFromLive(undefined)
+    expect(before.steps).toHaveLength(0)
+    expect(before.bar).toBe('none')
+
+    const after = viewFromLive(snapshot())
+    expect(after.bar).toBe('segments')
+    expect(after.total).toBe(2)
+    expect(after.steps.map((step) => step.line)).toEqual([1, 5])
+    expect(after.steps.map((step) => step.text)).toEqual(['$a = 1', 'Write-Output $a'])
   })
 
   it('ignores a current line that is not one of the steps', () => {
-    const view = viewFromLive(snapshot({ current: 99 }), COMMAND)
+    const view = viewFromLive(snapshot({ current: 99 }))
     expect(view.currentIndex).toBe(-1)
   })
 
   it('carries the partial flag through', () => {
-    expect(viewFromLive(snapshot({ partial: true }), COMMAND).partial).toBe(true)
+    expect(viewFromLive(snapshot({ partial: true })).partial).toBe(true)
+  })
+
+  it('carries the refusal of a live record that planned no steps', () => {
+    const view = viewFromLive(
+      snapshot({ instrumented: false, refused: true, total: 0, steps: [], current: null }),
+    )
+    expect(view.refused).toBe(true)
+    expect(view.instrumented).toBe(false)
+    expect(view.steps).toEqual([])
+    expect(view.total).toBe(0)
   })
 })
 
@@ -95,6 +129,7 @@ describe('viewFromSettled', () => {
   const meta: ShellProgressMeta = {
     v: 1,
     instrumented: true,
+    refused: false,
     partial: false,
     preamble: 'lead-in',
     steps: [
@@ -104,7 +139,7 @@ describe('viewFromSettled', () => {
   }
 
   it('derives durations from the persisted timings, with no live source', () => {
-    const view = viewFromSettled(meta, COMMAND, false)
+    const view = viewFromSettled(meta, false)
     expect(view.running).toBe(false)
     expect(view.steps.map((step) => step.durationMs)).toEqual([120, 780])
     expect(view.steps.map((step) => step.phase)).toEqual(['done', 'done'])
@@ -116,18 +151,24 @@ describe('viewFromSettled', () => {
     const view = viewFromSettled({
       ...meta,
       steps: [{ line: 1, text: '$a = 1', output: '', startedAt: 0, endedAt: 6_000 }],
-    }, COMMAND, false)
+    }, false)
     expect(view.steps[0]?.tone).toBe('slow')
   })
 
-  it('falls back to the command text when no metadata was persisted', () => {
-    const view = viewFromSettled(undefined, COMMAND, false)
+  it('invents no rows when no metadata was persisted', () => {
+    // An old persisted record, or a host that recorded nothing. The card shows
+    // its header and the shell's own result output; it does NOT re-derive the
+    // command's shape — that was the guess this change removed.
+    const view = viewFromSettled(undefined, false)
     expect(view.instrumented).toBe(false)
-    expect(view.steps.map((step) => step.line)).toEqual([1, 2, 5])
+    expect(view.refused).toBe(false)
+    expect(view.steps).toEqual([])
+    expect(view.total).toBe(0)
+    expect(view.bar).toBe('none')
   })
 
   it('marks the last started step when the call failed', () => {
-    const view = viewFromSettled(meta, COMMAND, true)
+    const view = viewFromSettled(meta, true)
     expect(view.steps[1]?.phase).toBe('failed')
   })
 
@@ -138,8 +179,37 @@ describe('viewFromSettled', () => {
         { line: 1, text: '$a = 1', output: '', startedAt: 0, endedAt: 5 },
         { line: 5, text: 'Write-Output $a', output: '', startedAt: null, endedAt: null },
       ],
-    }, COMMAND, false)
+    }, false)
     expect(view.steps[1]?.phase).toBe('pending')
+  })
+
+  it('builds a zero-step view from a REFUSED record, so the refusal survives it', () => {
+    // A refusal plans NO step, so this metadata's step list is empty — exactly the
+    // case that used to collapse to an empty view, and (with the old `total > 1`
+    // notice) to no notice at all.
+    const view = viewFromSettled(
+      { v: 1, instrumented: false, refused: true, partial: false, preamble: '', steps: [] },
+      false,
+    )
+    expect(view.refused).toBe(true)
+    expect(view.instrumented).toBe(false)
+    expect(view.steps).toEqual([])
+    expect(view.total).toBe(0)
+    expect(view.bar).toBe('none')
+  })
+
+  it('does not call an ordinary single-step command refused', () => {
+    const view = viewFromSettled({
+      v: 1,
+      instrumented: false,
+      refused: false,
+      partial: false,
+      preamble: '',
+      steps: [{ line: 1, text: "Write-Output 'one'", output: 'one', startedAt: 0, endedAt: 5 }],
+    }, false)
+    expect(view.refused).toBe(false)
+    expect(view.instrumented).toBe(false)
+    expect(view.total).toBe(1)
   })
 })
 
@@ -184,6 +254,19 @@ describe('block narrowing', () => {
     expect(metaOf({ kind: 'tool-result' })).toBeUndefined()
     expect(metaOf({ kind: 'tool-result', meta: { steps: [] } })).toBeUndefined()
     expect(metaOf({ kind: 'tool-result', meta: 'nonsense' })).toBeUndefined()
+  })
+
+  it('keeps a REFUSED metadata whose step list is empty, and reads its flag', () => {
+    // The only metadata with no steps: a refusal planned none, and that emptiness
+    // IS the answer. Dropping it here would send the card back to the command's own
+    // shape and lose the refusal.
+    const refused = metaOf({
+      kind: 'tool-result',
+      meta: { v: 1, instrumented: false, refused: true, partial: false, preamble: '', steps: [] },
+    })
+    expect(refused?.refused).toBe(true)
+    expect(refused?.instrumented).toBe(false)
+    expect(refused?.steps).toEqual([])
   })
 
   it('drops a malformed step row instead of the whole metadata', () => {

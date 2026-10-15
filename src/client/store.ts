@@ -19,26 +19,6 @@ import type { ProgressPort } from './port.ts'
 export interface ProgressSnapshot {
   /** Live progress per call id; an absent key means "not watched yet". */
   readonly calls: Readonly<Record<string, LiveSnapshot>>
-  /** TEMPORARY diagnostics per call id, shown in the card's probe line. */
-  readonly probes: Readonly<Record<string, CallProbe>>
-}
-
-/**
- * TEMPORARY diagnostics for one watched call.
- *
- * These exist to answer, from a screenshot, the three questions a silent polling
- * failure cannot: did the poll ever start, what did the host answer, and was that
- * answer even usable. Remove together with the probe line in `./Row`.
- */
-export interface CallProbe {
-  /** Snapshot requests attempted. */
-  readonly polls: number
-  /** Consecutive unusable answers. */
-  readonly misses: number
-  /** The last answer said the host holds this call. */
-  readonly found: boolean
-  /** The last answer was refused, threw, or was malformed. */
-  readonly refused: boolean
 }
 
 /** The store face: an observable plus the watch registration a card opens. */
@@ -76,7 +56,6 @@ interface Watch {
   timer: ReturnType<typeof setInterval> | undefined
   inflight: boolean
   misses: number
-  polls: number
 }
 
 /**
@@ -91,17 +70,14 @@ export function createProgressStore(
 ): ProgressStore {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS
   const calls = new Map<string, LiveSnapshot>()
-  const probes = new Map<string, CallProbe>()
   const watches = new Map<string, Watch>()
   const listeners = new Set<() => void>()
-  let snapshot: ProgressSnapshot = { calls: {}, probes: {} }
+  let snapshot: ProgressSnapshot = { calls: {} }
 
   const publish = (): void => {
     const next: Record<string, LiveSnapshot> = {}
     for (const [callId, value] of calls) next[callId] = value
-    const nextProbes: Record<string, CallProbe> = {}
-    for (const [callId, value] of probes) nextProbes[callId] = value
-    snapshot = { calls: next, probes: nextProbes }
+    snapshot = { calls: next }
     for (const listener of listeners) listener()
   }
 
@@ -113,12 +89,11 @@ export function createProgressStore(
 
   const start = (callId: string): void => {
     if (watches.has(callId)) return
-    const watch: Watch = { count: 1, timer: undefined, inflight: false, misses: 0, polls: 0 }
+    const watch: Watch = { count: 1, timer: undefined, inflight: false, misses: 0 }
     watches.set(callId, watch)
     const tick = async (): Promise<void> => {
       if (watch.inflight) return
       watch.inflight = true
-      watch.polls += 1
       try {
         const next = await port.snapshot(callId)
         // ONLY a positive answer about THIS call moves the card forward. Three
@@ -136,18 +111,11 @@ export function createProgressStore(
         // result landed.
         if (next === undefined || !next.found) {
           watch.misses += 1
-          probes.set(callId, {
-            polls: watch.polls,
-            misses: watch.misses,
-            found: false,
-            refused: next === undefined,
-          })
           publish()
           if (watch.misses > MAX_MISSES) stop(callId)
           return
         }
         watch.misses = 0
-        probes.set(callId, { polls: watch.polls, misses: 0, found: true, refused: false })
         calls.set(callId, next)
         publish()
         // Now the host HAS spoken about this call: a settled answer ends the poll,
@@ -158,12 +126,6 @@ export function createProgressStore(
         // A thrown poll keeps the last snapshot and tries again on the next tick;
         // a card must never blink out because one request failed.
         watch.misses += 1
-        probes.set(callId, {
-          polls: watch.polls,
-          misses: watch.misses,
-          found: false,
-          refused: true,
-        })
         publish()
         if (watch.misses > MAX_MISSES) stop(callId)
       } finally {

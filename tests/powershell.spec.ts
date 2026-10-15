@@ -104,6 +104,47 @@ const PROBES: readonly Probe[] = [
       'Write-Output $h.a',
     ].join('\n'),
   },
+  {
+    // The bug these pin: a clause opens with a brace at column 0 AFTER the
+    // previous clause's `}` already closed the block, so the brace depth is 0
+    // again and a depth-only splitter reads `else {` as a new top-level step.
+    // The marker then lands between `}` and `else`, and a valid command becomes
+    // a syntax error. `else`, `catch`, `finally` and `do`'s `while` tail are all
+    // the same shape; the single-line `if (...) { a } else { b }` probe above
+    // never exercised it because it opens and closes on one line.
+    name: 'a multi-line if/else whose clause starts at column 0',
+    command: [
+      'cmd.exe /c exit 3',
+      'if ($?) {',
+      "  Write-Output 'ok=True'",
+      '}',
+      'else {',
+      "  Write-Output 'ok=False'",
+      '}',
+    ].join('\n'),
+  },
+  {
+    name: 'a multi-line try/catch whose clause starts at column 0',
+    command: [
+      'try {',
+      "  Write-Output 'tried'",
+      '}',
+      'catch {',
+      "  Write-Output 'caught'",
+      '}',
+    ].join('\n'),
+  },
+  {
+    name: 'a do/while whose tail starts at column 0',
+    command: [
+      '$i = 0',
+      'do {',
+      '  $i += 1',
+      '}',
+      'while ($i -lt 2)',
+      'Write-Output "i=$i"',
+    ].join('\n'),
+  },
 ]
 
 /** Count this call's marker lines in a captured stream. */

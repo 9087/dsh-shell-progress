@@ -128,3 +128,7 @@ and obvious in one screenshot.
 
 The last one skips itself when no `pwsh` can be spawned, so a sandbox boundary
 reads as a skip rather than a false failure.
+
+## Known limits
+
+What this plugin knowingly does not do, and what it does not verify, is written down with its evidence in [`docs/known-limits.md`](docs/known-limits.md).

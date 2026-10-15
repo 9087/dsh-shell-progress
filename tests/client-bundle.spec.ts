@@ -186,38 +186,80 @@ describe('the built client bundle', () => {
     expect(typeof face.watchCall).toBe('function')
   })
 
-  it('renders one progress segment per top-level step', async () => {
+  it('renders one progress segment per top-level step, from the host\'s metadata', async () => {
     const entry = await loadClientBundle()
     const module = entry.factory(loaderRequire) as { apply: (ctx: unknown) => void }
     const { ctx, registrations } = fakeClientContext()
     module.apply(ctx)
     const Component = registrations[0]?.component as (props: unknown) => unknown
 
-    // A SETTLED block with no persisted metadata: the card still knows the
-    // command's shape, which is the degraded path for an uninstrumented run.
-    const block = {
+    // A SETTLED block carrying the host's OWN step metadata: this is the only
+    // source the card may draw segments from (see `./model`'s header — the
+    // client cannot run a parser, and it no longer guesses).
+    const html = renderCall(Component, {
       kind: 'tool-result',
       callId: 'call-1',
       call: { name: 'shell_progress', argsRaw: JSON.stringify({ command: COMMAND, description: 'demo' }) },
       content: [],
       isError: false,
-    }
-    const props = {
-      callId: 'call-1',
-      toolName: 'shell_progress',
-      block,
-      t: (key: string, params?: Record<string, unknown>) => {
-        let out = key
-        for (const [name, value] of Object.entries(params ?? {})) out += ` ${name}=${String(value)}`
-        return out
+      meta: {
+        v: 1,
+        instrumented: true,
+        refused: false,
+        partial: false,
+        preamble: '',
+        steps: COMMAND.split('\n').map((text, index) => ({
+          line: index + 1,
+          text,
+          output: '',
+          startedAt: index * 10,
+          endedAt: index * 10 + 5,
+        })),
       },
-      useProgress: (select: (snapshot: { calls: Record<string, never> }) => unknown) => select({ calls: {} }),
-      watchCall: () => () => {},
-    }
-    const html = renderToStaticMarkup(createElement(Component as never, props as never))
+    })
     // Four segments, each carrying its phase; plus a header and the counter.
     expect((html.match(/data-phase=/g) ?? [])).toHaveLength(4)
+    expect(html).toContain('role="progressbar"')
     expect(html).toContain('row.title')
-    expect(html).toContain('4')
+    expect(html).toContain('row.counter')
+  })
+
+  it('draws NO bar and NO rows for a settled block with no metadata', async () => {
+    const entry = await loadClientBundle()
+    const module = entry.factory(loaderRequire) as { apply: (ctx: unknown) => void }
+    const { ctx, registrations } = fakeClientContext()
+    module.apply(ctx)
+    const Component = registrations[0]?.component as (props: unknown) => unknown
+
+    // The same four-line command, still settled, but the host persisted no steps.
+    // Old behaviour drew four GUESSED segments here; the guess is gone.
+    const html = renderCall(Component, {
+      kind: 'tool-result',
+      callId: 'call-1',
+      call: { name: 'shell_progress', argsRaw: JSON.stringify({ command: COMMAND, description: 'demo' }) },
+      content: [],
+      isError: false,
+    })
+    expect((html.match(/data-phase=/g) ?? [])).toHaveLength(0)
+    expect(html).not.toContain('role="progressbar"')
+    // The card is still the call's own row; it simply has nothing to measure yet.
+    expect(html).toContain('row.title')
   })
 })
+
+/** Render the first registered view for one call block. */
+function renderCall(Component: (props: unknown) => unknown, block: Record<string, unknown>): string {
+  const props = {
+    callId: 'call-1',
+    toolName: 'shell_progress',
+    block,
+    t: (key: string, params?: Record<string, unknown>) => {
+      let out = key
+      for (const [name, value] of Object.entries(params ?? {})) out += ` ${name}=${String(value)}`
+      return out
+    },
+    useProgress: (select: (snapshot: { calls: Record<string, never> }) => unknown) => select({ calls: {} }),
+    watchCall: () => () => {},
+  }
+  return renderToStaticMarkup(createElement(Component as never, props as never))
+}

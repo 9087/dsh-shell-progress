@@ -12,17 +12,23 @@
 
 import type { ShellDialect } from './dialect.ts'
 import { RESERVED_VARIABLE, instrument, looksInstrumented } from './instrument.ts'
+import { planPwshSteps } from './pwshtree.ts'
 import { splitSteps } from './split.ts'
 
 /** The PowerShell dialect. */
 export const pwshDialect: ShellDialect = {
   id: 'pwsh',
   toolName: 'shell_progress_pwsh',
-  description: 'Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr, rendered as a step list — per-step duration and collapsible per-step output — with a progress bar while it runs. PREFER THIS over `pwsh` for every command: it runs the same shell through the same executor and returns identical output and exit markers, so nothing is lost by using it. `pwsh` is for two cases only: (1) the command\'s raw stdout must be byte-exact — a protocol, binary or checksummed payload — because each step writes one short marker line to the process\'s stdout, stripped from the output you receive but genuinely written; (2) `run_in_background`, which this tool does not implement. A command the splitter cannot handle safely still runs, unmodified, and the card says so. Each call runs a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`.',
+  description: 'Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr, rendered as a step list — per-step duration and collapsible per-step output — with a progress bar while it runs. PREFER THIS over `pwsh` for every command: it runs the same shell through the same executor and returns identical output and exit markers, so nothing is lost by using it. `pwsh` is for two cases only: (1) the command\'s raw stdout must be byte-exact — a protocol, binary or checksummed payload — because each step writes one short marker line to the process\'s stdout, stripped from the output you receive but genuinely written; (2) `run_in_background`, which this tool does not implement. The step boundaries come from PowerShell\'s own parser, and a command that parser cannot plan — no parse, or a parse that reports syntax errors — still runs unmodified, and the card says so. Each call runs a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`.',
   commandParamDescription: 'The PowerShell command to execute. Top-level statements become progress segments.',
-  guidance: 'PowerShell: use `shell_progress_pwsh` for your commands, not `pwsh`. It runs the same PowerShell through the same executor, returns identical output and exit markers, and additionally renders the call as a step list with per-step timing and output. `pwsh` is for two cases only: (1) the command\'s raw stdout must be byte-exact — a protocol, binary or checksummed payload — since each step writes one short marker line to the process\'s stdout, stripped from the text you receive but genuinely written; (2) the command must run in the background, which this tool does not offer. Everything else — one statement or twenty, fast or slow — belongs on `shell_progress_pwsh`; a command it cannot split safely runs unmodified rather than failing. Redirection inside a step (`foo > out.txt`), pipes and stdin are unaffected: the marker is a separate statement, not part of your pipeline.',
+  guidance: 'PowerShell: use `shell_progress_pwsh` for your commands, not `pwsh`. It runs the same PowerShell through the same executor, returns identical output and exit markers, and additionally renders the call as a step list with per-step timing and output. `pwsh` is for two cases only: (1) the command\'s raw stdout must be byte-exact — a protocol, binary or checksummed payload — since each step writes one short marker line to the process\'s stdout, stripped from the text you receive but genuinely written; (2) the command must run in the background, which this tool does not offer. Everything else — one statement or twenty, fast or slow — belongs on `shell_progress_pwsh`; the step boundaries come from PowerShell\'s own parser, and a command it cannot plan runs unmodified rather than failing, because a guessed boundary could corrupt the command. Redirection inside a step (`foo > out.txt`), pipes and stdin are unaffected: the marker is a separate statement, not part of your pipeline.',
   reservedVariable: RESERVED_VARIABLE,
   split: splitSteps,
+  // The authoritative half: PowerShell's own parser answers "where does each
+  // top-level statement start?", so a clause that continues a statement
+  // (`else {`, `catch {`, a `do` block's trailing `while (...)`) is no longer
+  // mistaken for a new step. Undefined leaves `split` in charge.
+  plan: planPwshSteps,
   instrument,
 }
 

@@ -48,6 +48,20 @@ export interface ShellDialect {
    */
   split(command: string): SplitResult
   /**
+   * An AUTHORITATIVE plan for this command, when the dialect has a real parser
+   * to ask — asynchronous, because for PowerShell it means running a probe in
+   * the shell that will execute the command.
+   *
+   * `split` stays synchronous and stays the fallback: a dialect that cannot
+   * plan, or whose plan cannot be produced (no shell, timeout, unparseable
+   * probe output), simply leaves `undefined` here and the heuristic answers.
+   * A dialect without a parser omits the member entirely, so the bash side is
+   * untouched.
+   * @param command - the model's command text.
+   * @returns the authoritative result, or undefined for "use `split`".
+   */
+  plan?(command: string): Promise<SplitResult | undefined>
+  /**
    * Rewrite a command so each step announces itself before it runs.
    *
    * The rewrite must keep the line count, and it must not change what the command

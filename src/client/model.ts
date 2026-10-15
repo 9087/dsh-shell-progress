@@ -9,10 +9,26 @@
  * crash, when a wire value or a logged value is not the shape this version
  * expects.
  *
+ * ## The card never guesses at the steps
+ *
+ * The browser cannot run a parser: the grammar is a wasm artifact the HOST
+ * loads, and the client bundle is browser-pure by invariant. So there is no
+ * authoritative statement list on this side, and the heuristic splitter that
+ * used to fill the gap — `splitSteps` from `../split.ts` — is deliberately NOT
+ * called here any more. It was a second, independent answer to "where does a
+ * top-level statement begin?", drawn before the host had said anything, and a
+ * wrong boundary is exactly the defect the host-side planners exist to avoid.
+ *
+ * What the card shows before the host answers is therefore NOTHING beyond its
+ * own header: no bar, no rows. Both appear with the first host answer — the live
+ * snapshot while the command runs, the persisted metadata once it has settled.
+ * A settled record that carries no step metadata (an old persisted record, or a
+ * command whose metadata was dropped) keeps its header and its notice and shows
+ * no steps, which is the honest reading: the host recorded no steps for it.
+ *
  * @module dsh-shell-progress/client/model
  */
 
-import { splitSteps } from '../split.ts'
 import type { LiveSnapshot, ShellProgressMeta, StepProgress } from '../types.ts'
 
 /** The tool arguments this plugin reads back off a call block. */
@@ -94,6 +110,12 @@ export interface ProgressView {
   readonly preamble: string
   /** False when the command ran unmodified (a refusal, or a single-line command). */
   readonly instrumented: boolean
+  /**
+   * True when instrumentation was REFUSED, as opposed to a command that had
+   * nothing to instrument. This is what the card's "ran unmodified" notice is
+   * driven by: a refused command's step list is empty, so a count cannot say it.
+   */
+  readonly refused: boolean
   /** True when some output could not be attributed. */
   readonly partial: boolean
   /** True while the command is still running. */
@@ -117,33 +139,6 @@ interface Row {
   readonly endedAt: number | null
 }
 
-/** The steps this command splits into, with no observations attached yet. */
-function plannedRows(command: string): Row[] {
-  return splitSteps(command).steps.map((step) => ({
-    line: step.line,
-    text: step.text,
-    output: '',
-    startedAt: null,
-    endedAt: null,
-  }))
-}
-
-/** An empty view: no steps known, nothing running. */
-function emptyView(): ProgressView {
-  return {
-    steps: [],
-    preamble: '',
-    instrumented: false,
-    partial: false,
-    running: false,
-    currentIndex: -1,
-    done: 0,
-    total: 0,
-    currentElapsedMs: 0,
-    bar: 'none',
-  }
-}
-
 /**
  * Assemble the view from normalized rows and the run's liveness.
  * @param rows - the steps, in source order.
@@ -157,6 +152,7 @@ function assembleRows(
     readonly currentIndex: number
     readonly elapsedMs: number
     readonly instrumented: boolean
+    readonly refused: boolean
     readonly partial: boolean
     readonly preamble: string
     readonly failedIndex: number
@@ -193,6 +189,7 @@ function assembleRows(
     steps,
     preamble: state.preamble,
     instrumented: state.instrumented,
+    refused: state.refused,
     partial: state.partial,
     running: state.running,
     currentIndex: state.currentIndex,
@@ -205,25 +202,27 @@ function assembleRows(
 
 /**
  * Build the view for a settled call out of its persisted metadata.
+ *
+ * A settled call whose metadata is ABSENT (an old persisted record, or a host
+ * that persisted nothing) yields a view with NO steps: the card shows its own
+ * header and the result the shell renders beside it, and invents no rows. A
+ * REFUSED call's metadata is present and carries zero steps, which is a
+ * different fact — the refusal flag comes with it and drives the notice.
  * @param meta - the narrowed `presentationMeta`, when the call carried one.
- * @param command - the command's text (the fallback source when metadata is absent).
  * @param isError - whether the call itself failed, so the last started step can be marked.
  * @returns the renderable view.
  */
 export function viewFromSettled(
   meta: ShellProgressMeta | undefined,
-  command: string,
   isError: boolean,
 ): ProgressView {
-  const source: readonly (StepProgress | Row)[] = meta === undefined ? plannedRows(command) : meta.steps
-  const rows: Row[] = source.map((step) => ({
+  const rows: Row[] = (meta?.steps ?? []).map((step) => ({
     line: step.line,
     text: step.text,
     output: step.output,
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
-  if (rows.length === 0) return emptyView()
   // The failing step is not recorded per step, so the last step that started
   // carries the mark; an untouched tail stays "not started", which is the
   // honest reading.
@@ -236,6 +235,7 @@ export function viewFromSettled(
     currentIndex: -1,
     elapsedMs: 0,
     instrumented: meta?.instrumented ?? false,
+    refused: meta?.refused ?? false,
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
     failedIndex: isError ? lastStarted : -1,
@@ -244,21 +244,24 @@ export function viewFromSettled(
 
 /**
  * Build the view for a running call out of the host's live snapshot.
+ *
+ * With NO snapshot (the host has no record yet, or gave no usable answer) the
+ * view holds NO steps: `running` is still true — the call IS in flight, which is
+ * what the header's own state shows — while the bar and the rows wait for the
+ * first host answer instead of being guessed from the command text. See the
+ * module header for why the browser must not guess.
  * @param live - the snapshot, when the host answered for this call.
- * @param command - the command's text (the fallback source before the first marker).
  * @returns the renderable view.
  */
-export function viewFromLive(live: LiveSnapshot | undefined, command: string): ProgressView {
-  const planned = plannedRows(command)
+export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
   if (live === undefined || !live.found) {
-    // The host has no record (yet, or any more): draw the structure the
-    // command already implies and admit that the position is unknown.
-    if (planned.length === 0) return emptyView()
-    return assembleRows(planned, {
+    return assembleRows([], {
       running: true,
       currentIndex: -1,
       elapsedMs: 0,
       instrumented: false,
+      // The host has not spoken about this call yet, so no refusal is claimed.
+      refused: false,
       partial: false,
       preamble: '',
       failedIndex: -1,
@@ -282,6 +285,7 @@ export function viewFromLive(live: LiveSnapshot | undefined, command: string): P
     currentIndex,
     elapsedMs: live.elapsedMs,
     instrumented: live.instrumented,
+    refused: live.refused,
     partial: live.partial,
     preamble: live.preamble,
     failedIndex: -1,
@@ -384,10 +388,17 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
       endedAt: typeof step.endedAt === 'number' ? step.endedAt : null,
     })
   }
-  if (steps.length === 0) return undefined
+  if (steps.length === 0) {
+    // A REFUSED command's metadata carries ZERO steps, and that emptiness IS the
+    // answer: the refusal planned nothing rather than guessing. Dropping the
+    // metadata here would send the card back to the command's own shape and lose
+    // the refusal, so the flag is what keeps an empty meta alive.
+    if (record.refused !== true) return undefined
+  }
   return {
     v: typeof record.v === 'number' ? record.v : 0,
     instrumented: record.instrumented === true,
+    refused: record.refused === true,
     partial: record.partial === true,
     preamble: typeof record.preamble === 'string' ? record.preamble : '',
     steps,

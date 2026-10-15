@@ -1,0 +1,495 @@
+/**
+ * The parse-based planner, and the tool path that uses it.
+ *
+ * Two things need proving, and they are different questions:
+ *
+ * 1. `./pwshtree.ts` must answer correctly — `ERRORS` decides, the `LINES` of a
+ *    best-effort tree are never trusted, and stdout it does not recognise
+ *    yields no plan at all. Those are pure tests, and they run everywhere.
+ * 2. The tool must actually USE that answer. So the last suite drives the
+ *    registered tool through `apply` with a fake context whose executor runs a
+ *    REAL PowerShell, and asserts the plan's step lines and the marker's
+ *    placement in the text the executor was handed — with the plain and
+ *    instrumented commands compared byte for byte, the way the semantics suite
+ *    compares them.
+ *
+ * Skipped when no PowerShell can be spawned (a sandbox boundary, or a non-
+ * Windows host), because a false red would be worse than a skip.
+ */
+
+import { execFile } from 'node:child_process'
+import { describe, expect, it } from 'vitest'
+import { bashDialect } from '../src/bash.ts'
+import { apply } from '../src/index.ts'
+import { createNonce, instrument, markerPattern, stripMarkers } from '../src/instrument.ts'
+import { pwshDialect } from '../src/pwsh.ts'
+import { resolvePowershell } from '../src/pwsh-path.ts'
+import {
+  buildProbeSource,
+  MAX_PROBE_CHARS,
+  parseProbeOutput,
+  planPwshSteps,
+  stepsAtLines,
+} from '../src/pwshtree.ts'
+import { splitSteps } from '../src/split.ts'
+import type { Step } from '../src/split.ts'
+
+interface Run {
+  readonly code: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/** The executable the harness's own shell seam would pick on this host. */
+const POWERSHELL = resolvePowershell() ?? 'pwsh'
+
+/** Run one command in a fresh shell, exactly as the harness's tool does. */
+async function shell(command: string): Promise<Run> {
+  return await new Promise<Run>((resolve) => {
+    execFile(
+      POWERSHELL,
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+      { windowsHide: true, timeout: 60_000 },
+      (error, stdout, stderr) => {
+        const code = error === null ? 0 : typeof (error as { code?: unknown }).code === 'number'
+          ? (error as { code: number }).code
+          : 1
+        resolve({ code, stdout, stderr })
+      },
+    )
+  })
+}
+
+/** Count this call's marker lines in a captured stream. */
+function markerCount(text: string, nonce: string): number {
+  const pattern = markerPattern(nonce)
+  return text.split('\n').filter((line) => pattern.test(line.endsWith('\r') ? line.slice(0, -1) : line)).length
+}
+
+/** The command the brief's bug was measured on: the `else` sits at column 0. */
+const IF_ELSE = [
+  'cmd.exe /c exit 3',
+  'if ($?) {',
+  "  Write-Output 'ok=True'",
+  '}',
+  'else {',
+  "  Write-Output 'ok=False'",
+  '}',
+  'Write-Output "done"',
+].join('\n')
+
+/** A `do` block whose `while` tail is a line of its own at column 0. */
+const DO_WHILE = [
+  '$i = 0',
+  'do {',
+  '  $i++',
+  '}',
+  'while ($i -lt 2)',
+  'Write-Output "i=$i"',
+].join('\n')
+
+/** A `try`/`catch` spanning lines, with a step after it. */
+const TRY_CATCH = [
+  'try {',
+  '  Write-Output "trying"',
+  '} catch {',
+  '  Write-Output "caught"',
+  '}',
+  'Write-Output "done"',
+].join('\n')
+
+/**
+ * A script PowerShell cannot parse while the BRACE COUNTER is perfectly happy:
+ * `[` is a parse error, and it changes no depth. This is the shape that proves
+ * the error count is what refuses, because the heuristic would instrument it.
+ */
+const BROKEN_BUT_BALANCED = ['Write-Output "before"', '[', 'Write-Output "after"'].join('\n')
+
+/** A script the brace counter refuses on its own: the block is never closed. */
+const UNCLOSED_BRACE = ['if ($true) {', '  Write-Output 1'].join('\n')
+
+/**
+ * A command whose PROBE cannot be built at all: its base64 payload alone pushes
+ * the probe script past what may be handed to a shell on one command line. The
+ * brace counter is perfectly happy with it (twenty column-zero statements), so
+ * this is the case that shows the tool does NOT quietly fall back to the guess
+ * when the parser cannot answer.
+ */
+const OVERSIZED = Array.from(
+  { length: 20 },
+  (_, index) => `Write-Output '${index}-${'x'.repeat(980)}'`,
+).join('\n')
+
+describe('parseProbeOutput', () => {
+  it('reads the top-level statement lines from a clean probe', () => {
+    expect(parseProbeOutput('ERRORS 0\nLINES 1,2,8\n')).toEqual({ kind: 'lines', lines: [1, 2, 8] })
+  })
+
+  it('reads an empty statement list', () => {
+    expect(parseProbeOutput('ERRORS 0\nLINES ')).toEqual({ kind: 'lines', lines: [] })
+  })
+
+  it('REFUSES a populated statement list when the parser reported errors', () => {
+    // THE TRAP. A broken script still parses into a best-effort tree, so the
+    // probe prints both lines; the error count is the only thing that may be
+    // believed. If this ever returns a plan, instrumentation goes into a
+    // command that is already broken.
+    expect(parseProbeOutput('ERRORS 1\nLINES 1,2\n')).toEqual({ kind: 'errors', count: 1 })
+    expect(parseProbeOutput('ERRORS 3\nLINES 1,1,2')).toEqual({ kind: 'errors', count: 3 })
+  })
+
+  it('refuses output with no error count at all', () => {
+    // Without the count there is no way to know whether the statement list
+    // came from a script that parsed, so there is no answer to give.
+    expect(parseProbeOutput('LINES 1,2')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS')).toBeUndefined()
+    expect(parseProbeOutput('')).toBeUndefined()
+  })
+
+  it('refuses malformed counts and line numbers', () => {
+    expect(parseProbeOutput('ERRORS nope\nLINES 1')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS -1\nLINES 1')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nLINES 0')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nLINES 1,x')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nLINES 1.5')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nLINES ,')).toBeUndefined()
+  })
+
+  it('refuses output that is not a verdict, however shell-ish it looks', () => {
+    expect(parseProbeOutput('At line:1 char:1\n+ ...\nMissingEndCurlyBrace')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nLINES 1\nextra noise')).toEqual({ kind: 'lines', lines: [1] })
+  })
+
+  it('tolerates CRLF and a byte-order mark', () => {
+    expect(parseProbeOutput('\uFEFFERRORS 0\r\nLINES 1,2\r\n')).toEqual({ kind: 'lines', lines: [1, 2] })
+  })
+})
+
+describe('stepsAtLines', () => {
+  it('collapses two statements that start on the same line', () => {
+    const source = '$a = 1; $b = 2\nWrite-Output $b'
+    expect(stepsAtLines(source, [1, 1, 2])).toEqual([
+      { line: 1, text: '$a = 1; $b = 2' },
+      { line: 2, text: 'Write-Output $b' },
+    ])
+  })
+
+  it('sorts the lines and takes each step\'s text from its own source line', () => {
+    const source = ['Write-Output "a"', '', 'Write-Output "c"'].join('\n')
+    expect(stepsAtLines(source, [3, 1])).toEqual([
+      { line: 1, text: 'Write-Output "a"' },
+      { line: 3, text: 'Write-Output "c"' },
+    ])
+  })
+
+  it('drops a line this source does not have', () => {
+    expect(stepsAtLines('Write-Output 1', [1, 9])).toEqual([{ line: 1, text: 'Write-Output 1' }])
+  })
+})
+
+describe('buildProbeSource', () => {
+  it('carries the command as base64, so no quoting layer can corrupt it', () => {
+    const command = `Write-Output "quote ' and \`backtick\`"\r\nWrite-Output 'ünïcøde'`
+    const source = buildProbeSource(command)
+    expect(source).toContain(Buffer.from(command, 'utf8').toString('base64'))
+    // One line, no double quote, no backslash: nothing left to escape.
+    expect(source).not.toContain('\n')
+    expect(source).not.toContain('\r')
+    expect(source).not.toContain('"')
+    expect(source).not.toContain('\\')
+  })
+})
+
+describe('planPwshSteps does not spawn when it cannot help', () => {
+  it('skips a single-line command', async () => {
+    expect(await planPwshSteps("Write-Output 'one'")).toBeUndefined()
+  })
+
+  it('skips a command the heuristic already refuses', async () => {
+    expect(splitSteps(UNCLOSED_BRACE).safe).toBe(false)
+    expect(await planPwshSteps(UNCLOSED_BRACE)).toBeUndefined()
+  })
+
+  it('gives no plan when no PowerShell can be resolved', async () => {
+    // An environment in which nothing on the candidate list exists, on every
+    // host: resolution fails, so there is nothing to spawn.
+    const env = { SystemRoot: 'C:\\__dsh_absent__', ProgramFiles: 'C:\\__dsh_absent__', PATH: '' }
+    expect(await planPwshSteps(IF_ELSE, { env })).toBeUndefined()
+  })
+})
+
+const probe = await shell("Write-Output 'ready'")
+const available = probe.stdout.trim() === 'ready'
+
+describe.skipIf(!available)('the planner, against a real PowerShell', () => {
+  const cases: readonly { readonly name: string; readonly command: string; readonly lines: readonly number[] }[] = [
+    { name: 'the full if/else is ONE statement', command: IF_ELSE, lines: [1, 2, 8] },
+    { name: 'the full try/catch is ONE statement', command: TRY_CATCH, lines: [1, 6] },
+    { name: 'the full do/while is ONE statement', command: DO_WHILE, lines: [1, 2, 6] },
+  ]
+
+  for (const entry of cases) {
+    it(`plans ${entry.name}`, async () => {
+      const plan = await planPwshSteps(entry.command, { executable: POWERSHELL })
+      expect(plan?.safe).toBe(true)
+      expect(plan?.steps.map((step) => step.line)).toEqual(entry.lines)
+      // Each step's text is its own source line, unchanged.
+      for (const step of plan?.steps ?? []) {
+        expect(step.text).toBe(entry.command.split('\n')[step.line - 1])
+      }
+    })
+  }
+
+  for (const entry of cases) {
+    describe(entry.name, () => {
+      it('produces byte-identical output and the same exit status, instrumented from the plan', async () => {
+        const plan = await planPwshSteps(entry.command, { executable: POWERSHELL })
+        expect(plan?.safe).toBe(true)
+        const steps: readonly Step[] = plan?.steps ?? []
+        const nonce = createNonce()
+        const plain = await shell(entry.command)
+        const marked = await shell(instrument(entry.command, steps, nonce))
+
+        expect(markerCount(marked.stdout, nonce)).toBe(steps.length)
+        expect(stripMarkers(marked.stdout, nonce)).toBe(plain.stdout)
+        expect(marked.code).toBe(plain.code)
+        expect(marked.stderr).toBe(plain.stderr)
+      })
+    })
+  }
+
+  it('refuses a command whose syntax the parser rejects, even when the braces balance', async () => {
+    expect(splitSteps(BROKEN_BUT_BALANCED).safe).toBe(true)
+    const plan = await planPwshSteps(BROKEN_BUT_BALANCED, { executable: POWERSHELL })
+    expect(plan?.safe).toBe(false)
+    // The heuristic's steps survive for the degraded card; nothing is instrumented.
+    expect(plan?.steps.length).toBeGreaterThan(1)
+    expect(plan?.reason).toMatch(/syntax error/)
+  })
+
+  it('sees the trap on a real shell: errors AND a populated statement list', async () => {
+    // The measured fact behind the gate, taken from the real probe rather than
+    // asserted in prose. The parser answers with a best-effort tree — `LINES`
+    // is populated — while reporting errors, and the verdict must be the
+    // errors.
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        POWERSHELL,
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', buildProbeSource(BROKEN_BUT_BALANCED)],
+        { windowsHide: true, timeout: 30_000 },
+        (error, out) => { error === null ? resolve(out) : reject(error) },
+      )
+    })
+    expect(stdout).toMatch(/ERRORS [1-9]\d*/)
+    expect(stdout).toMatch(/LINES 1/)
+    expect(parseProbeOutput(stdout)?.kind).toBe('errors')
+  })
+
+  it('is exposed by the pwsh dialect, and by bash', () => {
+    expect(pwshDialect.plan).toBeTypeOf('function')
+    // Stage 2 landed: bash has a planner too (tree-sitter, see
+    // `./bashtree.spec.ts`). This assertion used to pin `bashDialect.plan` as
+    // UNDEFINED, which was the honest Stage-1 state and is now the opposite of
+    // the contract — with a planner present, a bash command the planner cannot
+    // answer is REFUSED rather than split by the heuristic.
+    expect(bashDialect.plan).toBeTypeOf('function')
+  })
+})
+
+/** One tool result as this test reads it. */
+interface ToolResult {
+  readonly exitCode: number | null
+  readonly stdout: { readonly text: string }
+  readonly progress: {
+    readonly instrumented: boolean
+    readonly refused: boolean
+    readonly steps: readonly { readonly line: number; readonly text: string }[]
+  }
+}
+
+/** The registered tool definition, narrowed to what this suite calls. */
+interface RegisteredTool {
+  readonly name: string
+  execute(args: { readonly command: string; readonly description: string }, exec: unknown): Promise<ToolResult>
+}
+
+/**
+ * `apply` against a context whose executor runs the command for real.
+ *
+ * The executor is the one seam that must NOT be faked: whether the plan is
+ * used is visible in the text handed to it, and whether the result is right is
+ * visible in the bytes that come back.
+ */
+function toolWithRealExecutor(): { readonly tool: RegisteredTool; readonly handed: string[] } {
+  const handed: string[] = []
+  const registry: RegisteredTool[] = []
+  const base: Record<string, unknown> = {
+    tools: { register: (definition: RegisteredTool) => { registry.push(definition); return () => {} } },
+    shell: {
+      sandboxMode: undefined,
+      resolve: (request: unknown) => request,
+      execute: async (request: { readonly command: string }) => {
+        handed.push(request.command)
+        const run = await shell(request.command)
+        let cursor = 0
+        return {
+          readOutput: () => {
+            const delta = run.stdout.slice(cursor)
+            cursor = run.stdout.length
+            return { delta, lossy: false }
+          },
+          done: Promise.resolve(),
+          result: async () => ({
+            aborted: false,
+            exitCode: run.code,
+            signal: null,
+            timedOut: false,
+            timeoutMs: 60_000,
+            stdout: { text: run.stdout, truncated: false },
+            stderr: { text: run.stderr, truncated: false },
+          }),
+        }
+      },
+    },
+    shellEnv: { collect: () => ({}) },
+    systemPrompt: undefined,
+    logger: { debug: () => {}, warn: () => {} },
+    effect: (fn: () => unknown) => fn(),
+    inject: (_deps: string[], callback: (ctx: unknown) => unknown) => callback(base),
+    get: () => undefined,
+  }
+  // A tiny poll interval: the executor is already finished when it returns.
+  apply(base as never, { pollIntervalMs: 1 })
+  const tool = registry[0]
+  if (tool === undefined) throw new Error('the plugin registered no tool')
+  return { tool, handed }
+}
+
+/** Drive one command through the registered tool. */
+async function throughTool(command: string): Promise<{ readonly result: ToolResult; readonly handed: string }> {
+  const { tool, handed } = toolWithRealExecutor()
+  const result = await tool.execute({ command, description: 'planner wiring' }, { callId: 'call-1' })
+  const sent = handed[0]
+  if (sent === undefined) throw new Error('the executor was never called')
+  return { result, handed: sent }
+}
+
+describe.skipIf(!available)('the tool path instruments from the plan, not the brace counter', () => {
+  it('uses the plan\'s step lines for the if/else command', async () => {
+    const { result, handed } = await throughTool(IF_ELSE)
+    const plain = await shell(IF_ELSE)
+
+    // The plan's lines, not the heuristic's [1, 2, 5, 8].
+    expect(result.progress.instrumented).toBe(true)
+    expect(result.progress.steps.map((step) => step.line)).toEqual([1, 2, 8])
+    // No marker before the `else`, which is what used to break the command.
+    const sent = handed.split('\n')
+    expect(sent[0]).toContain('__DSH_STEP_')
+    expect(sent[1]).toContain('__DSH_STEP_')
+    expect(sent[4]).toBe('else {')
+    expect(sent[4]).not.toContain('__DSH_STEP_')
+    expect(sent[7]).toContain('__DSH_STEP_')
+    // And the model still sees exactly the plain command's bytes.
+    expect(result.exitCode).toBe(plain.code)
+    expect(result.stdout.text).toBe(plain.stdout)
+  })
+
+  it('uses the plan for the do/while tail at column 0', async () => {
+    const { result, handed } = await throughTool(DO_WHILE)
+    const plain = await shell(DO_WHILE)
+    expect(result.progress.instrumented).toBe(true)
+    expect(result.progress.steps.map((step) => step.line)).toEqual([1, 2, 6])
+    expect(handed.split('\n')[4]).toBe('while ($i -lt 2)')
+    expect(result.stdout.text).toBe(plain.stdout)
+  })
+
+  it('runs a syntax-broken command unmodified, and its record carries the refusal', async () => {
+    // The plan DID answer here — its verdict is "PowerShell reported syntax
+    // errors" — so the SplitResult is used as-is and its heuristic steps stay only
+    // to give the degraded card something to draw. Nothing is instrumented.
+    const { result, handed } = await throughTool(BROKEN_BUT_BALANCED)
+    const plain = await shell(BROKEN_BUT_BALANCED)
+    expect(result.progress.instrumented).toBe(false)
+    expect(result.progress.refused).toBe(true)
+    expect(result.progress.steps.length).toBeGreaterThan(1)
+    expect(handed).toBe(BROKEN_BUT_BALANCED)
+    expect(result.stdout.text).toBe(plain.stdout)
+    expect(result.exitCode).toBe(plain.code)
+  })
+
+  // The tests below are the NEW contract of `resolveSplit`. They replace the old
+  // "pins the heuristic bug the plan fixes" test, which asserted the heuristic's
+  // superseded `[1, 2, 5, 8]`: when a dialect has a planner, a parse that cannot be
+  // produced is a REFUSAL, never a fallback to the guess.
+
+  it('refuses an unclosed block the planner was asked about, and runs it unmodified', async () => {
+    // `planPwshSteps` answers `undefined` here (the heuristic already refuses, so
+    // the probe is skipped) — the "heuristic-already-unsafe skip" case.
+    expect(splitSteps(UNCLOSED_BRACE).safe).toBe(false)
+    const { result, handed } = await throughTool(UNCLOSED_BRACE)
+    const plain = await shell(UNCLOSED_BRACE)
+    expect(result.progress.instrumented).toBe(false)
+    expect(result.progress.refused).toBe(true)
+    // NO steps: a refusal is not a guess, so the empty list is the honest answer —
+    // and the card's notice therefore cannot hang on a step count.
+    expect(result.progress.steps).toEqual([])
+    expect(handed).toBe(UNCLOSED_BRACE)
+    expect(result.stdout.text).toBe(plain.stdout)
+    expect(result.exitCode).toBe(plain.code)
+  })
+
+  it('never falls back to the heuristic when the planner cannot deliver', async () => {
+    // The brace counter is happy with twenty column-zero statements, so the OLD
+    // code instrumented this from its own guess. The probe cannot even be built,
+    // which is a refusal: the command must reach the shell verbatim.
+    const heuristic = splitSteps(OVERSIZED)
+    expect(heuristic.safe).toBe(true)
+    expect(heuristic.steps).toHaveLength(20)
+    expect(buildProbeSource(OVERSIZED).length).toBeGreaterThan(MAX_PROBE_CHARS)
+
+    const { result, handed } = await throughTool(OVERSIZED)
+    const plain = await shell(OVERSIZED)
+    expect(result.progress.instrumented).toBe(false)
+    expect(result.progress.refused).toBe(true)
+    expect(result.progress.steps).toEqual([])
+    expect(handed).toBe(OVERSIZED)
+    expect(handed).not.toContain('__DSH_STEP_')
+    expect(result.stdout.text).toBe(plain.stdout)
+    expect(result.exitCode).toBe(plain.code)
+  })
+
+  it('refuses when the planner cannot spawn a shell, and still runs the command for real', async () => {
+    // `DSH_PWSH_PATH` is a bare name, which the resolver returns without touching
+    // the filesystem — so only the PLANNER's spawn fails, and the suite's own shell
+    // (resolved when this module loaded) is untouched. An if/else the heuristic
+    // would instrument is refused instead: that pivot is this change.
+    const before = process.env.DSH_PWSH_PATH
+    process.env.DSH_PWSH_PATH = 'dsh-shell-that-does-not-exist'
+    try {
+      const { result, handed } = await throughTool(IF_ELSE)
+      const plain = await shell(IF_ELSE)
+      expect(result.progress.instrumented).toBe(false)
+      expect(result.progress.refused).toBe(true)
+      expect(result.progress.steps).toEqual([])
+      expect(handed).toBe(IF_ELSE)
+      expect(handed).not.toContain('__DSH_STEP_')
+      expect(result.stdout.text).toBe(plain.stdout)
+      expect(result.exitCode).toBe(plain.code)
+    } finally {
+      if (before === undefined) delete process.env.DSH_PWSH_PATH
+      else process.env.DSH_PWSH_PATH = before
+    }
+  })
+
+  it('does not refuse an ordinary single-line command', async () => {
+    // The one uninstrumented case that is NOT a refusal: there is no boundary to
+    // decide, so the card stays quiet — which the refusal flag, not a step count,
+    // is what now distinguishes.
+    const command = "Write-Output 'one'"
+    const { result, handed } = await throughTool(command)
+    expect(result.progress.instrumented).toBe(false)
+    expect(result.progress.refused).toBe(false)
+    expect(result.progress.steps).toHaveLength(1)
+    expect(handed).toBe(command)
+  })
+})

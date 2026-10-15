@@ -3,7 +3,11 @@
  *
  * PowerShell opens every block form (`if` / `foreach` / `for` / `while` /
  * `do` / `switch` / `try` / `function`) with a brace, so brace depth plus
- * column 0 is enough — there is no keyword-matching pass and no shell parser.
+ * column 0 decides almost every step — there is no shell parser here. The one
+ * exception is a clause that CONTINUES the previous statement's block: `else`,
+ * `elseif`, `catch`, `finally` and `do`'s `while` tail arrive back at depth 0 and
+ * therefore look exactly like a new statement, so they are recognized by their
+ * reserved leading word (see `clauseContinuation`).
  *
  * The splitter is deliberately CONSERVATIVE: anything it cannot decide
  * (unterminated quotes, block comments, here-strings, a line continuation,
@@ -115,12 +119,40 @@ export function scanLine(line: string): LineScan {
 }
 
 /**
+ * Whether this line continues the PREVIOUS statement's block rather than
+ * starting a statement of its own.
+ *
+ * Brace depth cannot see these. `if () { }` balances its own braces, so a
+ * following `else {` arrives at depth 0, at column 0 and not starting with `}` —
+ * indistinguishable from a top-level statement — and a marker placed before it
+ * lands between the closing `}` and its clause, turning a valid command into a
+ * syntax error. The clause belongs to the previous step, so it must not become
+ * one.
+ *
+ * `else`, `elseif`, `catch`, `finally` and `until` are reserved words that can
+ * never begin a statement, so no context is needed to place them. `while` is the
+ * ambiguous one: it opens a real loop, or closes a `do` block. Only a `do` block
+ * can precede it as a clause, and that block is necessarily the statement just
+ * seen, so the pending `do` is read off the previous step's own text.
+ * @param text - one source line.
+ * @param previousStep - the text of the last top-level step, if there was one.
+ * @returns true when the line is a clause continuation rather than a step.
+ */
+function clauseContinuation(text: string, previousStep: string | undefined): boolean {
+  const head = text.trimStart()
+  if (/^(?:else|elseif|catch|finally|until)\b/i.test(head)) return true
+  const pendingDo = previousStep !== undefined && /^do\b/i.test(previousStep.trimStart())
+  return /^while\b/i.test(head) && pendingDo
+}
+
+/**
  * Split a command into its top-level steps.
  *
  * A step must be a non-empty line that starts at column 0, does not start with
- * `}`, and sits at brace depth 0. Loop bodies and block closers therefore
- * never become steps, which is what keeps one iteration from producing a
- * marker — the whole point of instrumenting only top-level steps.
+ * `}`, sits at brace depth 0, and is not a clause continuing the previous step.
+ * Loop bodies, block closers and clauses therefore never become steps, which is
+ * what keeps one iteration from producing a marker — the whole point of
+ * instrumenting only top-level steps.
  * @param source - the command text, any line ending.
  * @returns the steps found and whether instrumentation may proceed.
  */
@@ -135,7 +167,9 @@ export function splitSteps(source: string): SplitResult {
     if (refusal !== undefined) return { steps, safe: false, reason: refusal }
     const atColumnZero = line[0] !== ' ' && line[0] !== '\t'
     const isCloser = line.trimStart().startsWith('}')
-    if (atColumnZero && !isCloser && depth === 0) steps.push({ line: index + 1, text: line })
+    const startsStep = atColumnZero && !isCloser && depth === 0
+      && !clauseContinuation(line, steps.at(-1)?.text)
+    if (startsStep) steps.push({ line: index + 1, text: line })
     const scan = scanLine(line)
     if (!scan.safe) return { steps, safe: false, reason: scan.reason ?? 'undecidable line' }
     depth += scan.braces

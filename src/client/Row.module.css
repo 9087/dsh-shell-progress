@@ -68,13 +68,3 @@
   color: var(--dsw-alias-label-caption, inherit);
   font-size: var(--dsh-content-font-size-secondary, 13px);
 }
-
-/* TEMPORARY, while-running only: it costs nothing on a settled card and it is
- * the one place a live run can be inspected from a screenshot. */
-.dbg {
-  margin: 0;
-  color: var(--dsw-alias-label-caption, inherit);
-  font-family: var(--ds-font-family-code);
-  font-size: 11px;
-  line-height: 16px;
-}

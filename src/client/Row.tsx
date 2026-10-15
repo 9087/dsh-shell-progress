@@ -40,6 +40,7 @@ import type { ProgressBarLabels } from './ProgressBar.tsx'
 import { StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
 import { argsOf, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled } from './model.ts'
+import type { ProgressView } from './model.ts'
 import type { ProgressSnapshot } from './store.ts'
 import styles from './Row.module.css'
 
@@ -111,9 +112,9 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
     return watchCall(callId)
   }, [callId, settled, watchCall])
 
-  const view: ReturnType<typeof viewFromLive> = settled
-    ? viewFromSettled(metaOf(block), args.command, failed)
-    : viewFromLive(live as LiveSnapshot | undefined, args.command)
+  const view: ProgressView = settled
+    ? viewFromSettled(metaOf(block), failed)
+    : viewFromLive(live as LiveSnapshot | undefined)
 
   const barLabels: ProgressBarLabels = {
     stepLabel: (row, total) => t('row.stepLabel', { index: row.index, total, line: row.line }),
@@ -131,7 +132,15 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   // Both notices describe a SETTLED run: while a call is in flight the host may
   // simply not have answered yet, and claiming "ran unmodified" then would be
   // wrong.
-  const notice = settled && view.total > 1 && !view.instrumented
+  //
+  // The unmodified notice hangs on the refusal FLAG, never on the step count. It
+  // used to read `view.total > 1`, a proxy that held only while a refused command
+  // still carried the heuristic's guessed steps: now that a refusal plans NO step
+  // (a refusal is not a guess), such a card's total is 0 and a count would make
+  // the notice disappear — silently, which is exactly the regression this flag
+  // exists to prevent. `!view.instrumented` is kept beside it because the notice
+  // claims the command ran unmodified, which cannot be true of an instrumented run.
+  const notice = settled && view.refused && !view.instrumented
     ? t('row.notInstrumented')
     : settled && view.partial
       ? t('row.partial')
@@ -159,17 +168,25 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
           </>
         )}
       />
-      <div className={styles.progressLine}>
-        <ProgressBar
-          view={view}
-          labels={barLabels}
-          onHoverStep={setLinkedStep}
-          linkedStep={linkedStep}
-        />
-        {view.total === 0 ? null : (
+      {/*
+       * The progress line is rendered ONLY once the host has produced steps. With
+       * none — a call whose live snapshot has not answered yet, or a settled
+       * record that carries no step metadata — the card must show no bar and no
+       * counter: an empty row would read as "progress is zero" rather than
+       * "nothing is known yet". The card's own header above is what identifies
+       * the call, and the shell renders the command line and the output.
+       */}
+      {view.total === 0 ? null : (
+        <div className={styles.progressLine}>
+          <ProgressBar
+            view={view}
+            labels={barLabels}
+            onHoverStep={setLinkedStep}
+            linkedStep={linkedStep}
+          />
           <span className={styles.counter}>{t('row.counter', { done: view.done, total: view.total })}</span>
-        )}
-      </div>
+        </div>
+      )}
       {notice === undefined ? null : <p className={styles.notice}>{notice}</p>}
       {/* The revealed detail scrolls on ITS OWN: the header and the bar above it
           are what the reader was already looking at, and dragging them out of

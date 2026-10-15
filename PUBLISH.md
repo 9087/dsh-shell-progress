@@ -75,10 +75,22 @@ suite, builds, and publishes with `npm publish --provenance`.
 
    Save. That entry is what lets the workflow below publish without a token.
 
-3. **Protect `main`** in the GitHub repository settings, and require the `verify`
-   job from `.github/workflows/ci.yml` as a status check.
+4. **Protect `main` (optional)** — and be careful which half you turn on.
 
-4. **Push the repository** (the first release needs the workflow file present on
+   `release-it` pushes its release commit **directly to `main`** (`git.push: true` in
+   `.release-it.json`), so enabling *Require a pull request before merging* makes
+   `pnpm run release` fail at its LAST step — after it has already bumped the
+   version, written `CHANGELOG.md`, committed and tagged. If you want protection
+   anyway, allow the repository admin to bypass it.
+
+   For a repository with one committer the half that earns its keep is the other
+   one: block **force-pushes** and **branch deletion**, leave the pull-request
+   requirement off, and treat `verify` as a visible signal rather than a gate.
+   Skipping protection entirely is also defensible here, because the release path
+   already gates itself twice: `before:bump` runs `pnpm run build && pnpm test`,
+   and the tag triggers `release.yml`, which runs the same suite before publishing.
+
+5. **Push the repository** (the first release needs the workflow file present on
    the default branch):
 
    ```sh

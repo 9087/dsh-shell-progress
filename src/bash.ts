@@ -33,14 +33,18 @@
  * Bash's block syntax is keyword-delimited (`if`/`then`/`fi`, `for`/`do`/`done`,
  * `case`/`esac`), which cannot be tracked by brace depth the way PowerShell's
  * can. Rather than guess where such a block ends, this splitter REFUSES the whole
- * command: instrumentation is abandoned and the command runs exactly as written,
- * with the card saying so. A coarser bar is a nuisance; a wrong step boundary
- * mis-attributes output and is a defect.
+ * command. That refusal is no longer the end of the story: `./bashtree.ts`
+ * supplies an authoritative parser (tree-sitter's bash grammar, compiled to
+ * wasm), and a refused command is planned from it. Only when that planner has no
+ * answer either does the command run exactly as written, with the card saying so.
+ * A coarser bar is a nuisance; a wrong step boundary mis-attributes output and is
+ * a defect.
  *
  * @module dsh-shell-progress/bash
  */
 
 import type { ShellDialect } from './dialect.ts'
+import { planBashSteps } from './bashtree.ts'
 import { MARKER_PREFIX, createNonce, looksInstrumented, markerText } from './instrument.ts'
 import type { LineScan, SplitResult, Step } from './split.ts'
 
@@ -205,6 +209,12 @@ export const bashDialect: ShellDialect = {
   guidance: 'Bash: use `shell_progress_bash` for your commands, not `bash`. It runs the same bash through the same executor, returns identical output and exit markers, and additionally renders the call as a step list with per-step timing and output. `bash` is for two cases only: (1) the command\'s raw stdout must be byte-exact — a protocol, binary or checksummed payload — since each step writes one short marker line to the process\'s stdout, stripped from the text you receive but genuinely written; (2) a background job, which this tool does not offer. Everything else — one statement or twenty, fast or slow — belongs on `shell_progress_bash`; a command it cannot split safely runs unmodified rather than failing. Redirection inside a step (`foo > out.txt`), pipes and stdin are unaffected: the marker is a separate statement, not part of your pipeline.',
   reservedVariable: RESERVED_VARIABLE_BASH,
   split: splitBash,
+  // The authoritative half: tree-sitter's bash grammar answers "where does each
+  // top-level statement start?", so the keyword-delimited blocks this splitter
+  // refuses are planned from a real parse instead of being abandoned. Undefined
+  // leaves `split` in charge (and, for a dialect WITH a planner, is a refusal
+  // rather than a fallback — see `resolveSplit` in `./index.ts`).
+  plan: planBashSteps,
   instrument: instrumentBash,
 }
 

@@ -141,8 +141,42 @@ function settledBlock(): Record<string, unknown> {
   }
 }
 
+/**
+ * A settled call the host REFUSED to instrument: the metadata says so explicitly,
+ * and its step list is EMPTY — a refusal is not a guess, so nothing is planned.
+ *
+ * This is the record that would lose its notice if the card read a step count:
+ * `total` is 0, so `total > 1` is false and the notice would vanish silently.
+ */
+function refusedBlock(): Record<string, unknown> {
+  return {
+    ...settledBlock(),
+    meta: { v: 1, instrumented: false, refused: true, partial: false, preamble: '', steps: [] },
+  }
+}
+
+/** A settled call that simply had ONE step: uninstrumented, and not refused. */
+function singleStepBlock(): Record<string, unknown> {
+  const command = 'Write-Output "[1/1] only"'
+  return {
+    ...settledBlock(),
+    call: { name: 'shell_progress', argsRaw: JSON.stringify({ command, description: 'one step' }) },
+    meta: {
+      v: 1,
+      instrumented: false,
+      refused: false,
+      partial: false,
+      preamble: '',
+      steps: [{ line: 1, text: command, output: '', startedAt: null, endedAt: null }],
+    },
+  }
+}
+
 /** Register the card out of the bundle and render it for one settled call. */
-async function renderCard(): Promise<string> {
+async function renderCard(
+  block: Record<string, unknown> = settledBlock(),
+  live?: Record<string, unknown>,
+): Promise<string> {
   const entry = await loadBundle()
   const module = entry.factory(loaderRequire) as { apply: (ctx: unknown) => void }
   const registrations: { component: unknown }[] = []
@@ -164,13 +198,14 @@ async function renderCard(): Promise<string> {
     callId: 'call-1',
     toolName: 'shell_progress',
     phase: 'result',
-    block: settledBlock(),
+    block,
     t: (key: string, params?: Record<string, unknown>) => {
       let out = key
       for (const [name, value] of Object.entries(params ?? {})) out += ` ${name}=${String(value)}`
       return out
     },
-    useProgress: (select: (snapshot: { calls: Record<string, never> }) => unknown) => select({ calls: {} }),
+    useProgress: (select: (snapshot: { calls: Record<string, never> }) => unknown) =>
+      select({ calls: live === undefined ? {} : { 'call-1': live } as never }),
     watchCall: () => () => {},
   }
   return renderToStaticMarkup(createElement(Component as never, props as never))
@@ -214,5 +249,99 @@ describe('the built client bundle, rendered', () => {
     const classes = track?.[1] ?? ''
     expect(classes.length).toBeGreaterThan(4)
     expect(classes).not.toBe('undefined')
+  })
+
+  // The rendered proof for the refusal signal. The notice has to hang on the flag,
+  // because a REFUSED card has zero steps — `total > 1` is false for it — and it
+  // must still be invisible for a command that merely had one step.
+
+  it('shows the "ran unmodified" notice for a REFUSED call with no steps at all', async () => {
+    const html = await renderCard(refusedBlock())
+    // Not one segment and not one step row: the refusal planned none. The notice is
+    // still there, because the card draws it at its OWN level — below the progress
+    // line — rather than inside a per-step row that an empty list never renders.
+    expect((html.match(/data-phase=/g) ?? [])).toHaveLength(0)
+    expect(html).toContain('row.notInstrumented')
+    // Where it draws matters: the notice is the CARD's own paragraph, a sibling of
+    // the header and the progress line — not a piece of a per-step row, which a
+    // zero-step list never renders.
+    expect(/<p class="[^"]+">row\.notInstrumented<\/p>/.test(html)).toBe(true)
+  })
+
+  it('keeps that notice off a single-step command that was merely uninstrumented', async () => {
+    const html = await renderCard(singleStepBlock())
+    expect(html).not.toContain('row.notInstrumented')
+    // It is still a card with its own counter; it just has nothing to warn about.
+    expect(html).toContain('row.counter')
+  })
+
+  // The pin for C-6. The browser cannot run a parser, so a bar drawn before the
+  // host answers could only be a guess at the step boundaries. It is gone: the
+  // card draws nothing until the host's own data arrives.
+
+  /** A RUNNING call: the block is not settled, so the view comes from the LIVE source. */
+  function runningBlock(): Record<string, unknown> {
+    return {
+      kind: 'tool-call',
+      callId: 'call-1',
+      name: 'shell_progress',
+      argsRaw: JSON.stringify({ command: COMMAND, description: 'demo' }),
+    }
+  }
+
+  /** The host's answer for that call: the four steps are ITS statement list. */
+  function liveSnapshot(): Record<string, unknown> {
+    return {
+      found: true,
+      running: true,
+      instrumented: true,
+      refused: false,
+      partial: false,
+      current: 1,
+      total: 4,
+      elapsedMs: 1_000,
+      preamble: '',
+      steps: COMMAND.split('\n').map((text, index) => ({
+        line: index + 1,
+        text,
+        output: '',
+        startedAt: index === 0 ? 0 : null,
+        endedAt: index === 0 ? 100 : null,
+      })),
+    }
+  }
+
+  it('draws no bar and no rows before the host answers, then draws both', async () => {
+    // What the host says when it has no record yet. `found: false` is a real
+    // answer — "I have not registered this call" — not a transport failure.
+    const before = await renderCard(runningBlock(), {
+      found: false,
+      running: false,
+      instrumented: false,
+      refused: false,
+      partial: false,
+      current: null,
+      total: 0,
+      elapsedMs: 0,
+      preamble: '',
+      steps: [],
+    })
+    // NO bar (so no segments) and no counter. The step ROWS are not in this
+    // markup either, for a second reason: the tree is collapsed by default, and
+    // a static render never opens it — which is why the row-level pin lives in
+    // `./model.spec.ts`, where `view.steps` is read directly.
+    expect(before).not.toContain('role="progressbar"')
+    expect((before.match(/data-phase=/g) ?? [])).toHaveLength(0)
+    expect(before).not.toContain('row.counter')
+    expect(before).not.toContain('data-step')
+    // The card is still the call's own row: it has simply nothing to measure.
+    expect(before).toContain('row.title')
+
+    // ...and with the host's data, the bar and its one segment per step appear.
+    const after = await renderCard(runningBlock(), liveSnapshot())
+    expect(after).toContain('role="progressbar"')
+    expect((after.match(/data-phase=/g) ?? [])).toHaveLength(4)
+    expect(after).toContain('aria-valuemax="4"')
+    expect(after).toContain('row.counter done=1 total=4')
   })
 })
