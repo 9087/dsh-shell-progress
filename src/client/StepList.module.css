@@ -108,6 +108,11 @@
   border: 0;
   border-radius: 50%;
   background-color: var(--step-state-pending, currentColor);
+  /* The palette's saturation, read from the card's own declaration (`--step-saturation`
+   * in `Row.module.css`) — the same value the bar's segments paint with, because a dot
+   * that stayed vivid beside a calmer segment would be exactly the drift the shared
+   * palette exists to prevent. */
+  filter: saturate(var(--step-saturation, 1));
   transition: transform 120ms ease-out;
 }
 
@@ -207,7 +212,7 @@
  * There is NO hairline between the command and its output in this BODY. A rule
  * there was one box too many for a step that reads as one thought, and it was
  * drawing the separator in the wrong place: the divider belongs inside the
- * segment TOOLTIP, between the command and the output there (see `bubbleLabel`
+ * segment's hover CARD, between the command and the output there (see `stepCard`
  * in `ProgressBar.tsx`). Here the two are still told apart — the output is
  * dimmer, and the command wears the highlighted face — without a line.
  *

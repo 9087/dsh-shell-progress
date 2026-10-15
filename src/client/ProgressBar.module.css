@@ -25,9 +25,13 @@
   gap: 1px;
   flex: 1 1 auto;
   min-width: 48px;
-  /* 9px: the bar should read as a real progress bar, not a hairline. Nothing has to
-   * clear it now that the linked segment wears no ring. */
+  /* 9px is the LINE's own height, not the height of the colour drawn on it: it is what
+   * the row's height, the bar's centre line and the hover card's anchor are all measured
+   * from, and it is the pointer target a segment offers. The colour inside a segment is
+   * 4px of it (see `.segment`), so the painted bar is a rule rather than a band without
+   * one pixel of the geometry or the hot zone moving. */
   height: 9px;
+  box-sizing: content-box;
 }
 
 .segmentWrap {
@@ -43,16 +47,33 @@
 .segment {
   flex: 1 1 auto;
   width: 100%;
+  /* The BOX is the pointer target, and it is the full height of the track — the same
+   * 9px the segment has always been. What the reader SEES is the 4px inside it (below),
+   * so the bar got thinner without the hover hot zone shrinking by a pixel. */
   height: 100%;
   min-width: 0;
-  padding: 0;
+  /* Top and bottom padding, and `background-clip: content-box` to paint the content box
+   * only. The padding moves the PAINTABLE area in while leaving the element's own box —
+   * and therefore the hit area, the outline, and this element's computed colour — where
+   * it was: 9px of box with 2.5px of padding above and below is 4px of colour, centred
+   * on exactly the line the 9px bar occupied. Nothing outside this rule moves: the row's
+   * height, the bar's centre line and the hover card's anchor are all still the track's
+   * own 9px. */
+  box-sizing: border-box;
+  padding: 2.5px 0;
   border: 0;
   border-radius: 2px;
+  background-clip: content-box;
   /* The state palette, not a colour: `--step-state-*` is declared once on the card
    * (`Row.module.css`) and read by the step list's dots too, so a segment and the
    * dot that stands for it can never be two different colours. The fallback is for
    * a bar rendered outside a card, which is not a shape the plugin produces. */
   background-color: var(--step-state-pending, currentColor);
+  /* How vivid that colour is painted, read from the palette's own declaration on the card
+   * (`--step-saturation` in `Row.module.css`) so the step list's dot reads down to the
+   * same value. The fallback is 1 — unchanged — for a bar rendered outside a card, which
+   * is not a shape the plugin produces. */
+  filter: saturate(var(--step-saturation, 1));
   cursor: pointer;
 }
 
@@ -64,10 +85,15 @@
 /* A segment lifts when the pointer is on it, and when the LIST points at it. Pure
  * vertical, so no segment's width ever changes — which is what makes it safe on a
  * bar whose every segment is already a solid block of colour, where a fill or an
- * opacity cue would have nothing to show. */
+ * opacity cue would have nothing to show.
+ *
+ * The lifted state is smaller too, by the same 2.5px of padding: 11px of box over the
+ * 9px track is 6px of colour, where it used to be 13px of box and 13px of colour. It
+ * still overflows equally up and down — `.segmentWrap` centres its item — so the lift
+ * reads as the segment rising rather than the bar sagging. */
 .segment:hover,
 .segment[data-linked='true'] {
-  height: 13px;
+  height: 11px;
 }
 
 /* Every state below names the SHARED palette (declared once on the card in
@@ -115,14 +141,20 @@
   opacity: var(--step-alpha-pending, 0.5);
 }
 
+/* The other bar shape — one fill for a command whose total is unknown. Its height follows
+ * the segmented bar's PAINTED height (`.segment`'s content box), so switching between the
+ * two shapes does not change how thick the bar looks. */
 .solid {
   position: relative;
   flex: 1 1 auto;
   min-width: 48px;
-  height: 6px;
+  height: 4px;
   border-radius: 2px;
   background-color: var(--dsw-alias-bg-skeleton, currentColor);
   overflow: hidden;
+  /* The same saturation as the segmented bar, so switching shapes does not change how
+   * loud the bar is either. */
+  filter: saturate(var(--step-saturation, 1));
 }
 
 .solidFill {
@@ -143,4 +175,94 @@
   .solidFill {
     transition: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * The segment's hover card.
+ *
+ * `HoverCard` renders its `anchor` inside a `<span>` of its own, and that span is
+ * `display: block`. Inside `.segmentWrap` — a flex container — a block-level item
+ * shrink-fits, and the button it wraps is `width: 100%` of a box whose width is still
+ * being resolved: the segment comes out ZERO wide. This is the same zero-width failure
+ * the module comment in `ProgressBar.tsx` records, one level down.
+ *
+ * So the wrapper is given the box the button used to BE: the whole segment, at the
+ * segment's own width and height, with the button stretched inside it and its hover lift
+ * centred, exactly as `.segmentWrap` used to centre the button itself. The wrapper
+ * cannot size the segment — the segment's width is the fixed device-pixel width the bar
+ * measured and hands down inline.
+ *
+ * In particular it must NOT be `display: contents`. That takes the wrapper out of layout
+ * and out of `getBoundingClientRect`, and that rect is what `HoverCard` positions the
+ * card against: the card then lands at the TOP OF THE VIEWPORT, a whole row away from
+ * the segment it belongs to, while every width stays correct. It was measured that way in
+ * a browser, and `e2e/card.spec.ts` now pins both halves — the segment widths and seams,
+ * and the card's distance from its own segment. */
+.segmentWrap > span {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+
+/* The card's insets. `HoverCard`'s `preview` variant carries no padding of its own —
+ * the content owns it — and its `overflow: hidden` keeps a tall output inside the
+ * rounded frame. `width: 100%` because the variant sets the width on the card it owns,
+ * not on this element. */
+.card {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Both the command and the output are `<pre>`-like blocks, so the code font has to be
+ * declared ON them: `<pre>` carries a user-agent `font-family: monospace`, and an
+ * element's own rule beats an inherited value. Relying on inheritance is what once made
+ * the step list's command render in the browser's default monospace while its clock got
+ * the shell's coding font. */
+.cardCommand,
+.cardOutput {
+  font: var(--dsw-font-markdown-code-block-small);
+  font-size: 11px;
+  line-height: 16px;
+  /* A terminal wraps at the column where the text runs out, whatever character is
+   * there; `break-all` is that, where `anywhere` would prefer a space. */
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.cardCommand {
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.cardTime {
+  margin-left: 0.6em;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The divider between the command and the output — in the CARD, which is the only
+ * place this plugin draws one: the step list's body deliberately has none (see
+ * `StepList.module.css`). A real element, which is the whole reason the card is a
+ * `HoverCard` and not a `Tooltip`: the `Tooltip`'s `label` is a string, so its divider
+ * could only ever be a run of box-drawing CHARACTERS sized to the widest line, while
+ * this rules itself to the card's own width.
+ *
+ * `border: 0` first because `<hr>` ships a full border box in every engine's UA sheet;
+ * only the top edge is wanted. */
+.cardRule {
+  margin: 6px 0 0;
+  border: 0;
+  border-top: 1px solid var(--dsw-alias-border-l3, currentColor);
+}
+
+/* The output is DIMMER than the command line, exactly as it is in the step list: what a
+ * command printed is the record, and the command is the thing being read. */
+.cardOutput {
+  margin: 6px 0 0;
+  color: var(--dsw-alias-label-caption, inherit);
 }

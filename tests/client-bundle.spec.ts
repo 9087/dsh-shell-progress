@@ -73,10 +73,11 @@ function loaderRequire(id: string): unknown {
     return stubModule({
       // The primitives this card really uses, with just enough behaviour.
       StateDot: () => null,
+      // The card's ANCHOR, and only the anchor: the card itself is portaled and opens on
+      // hover, which no width measurement in this file reaches. A stand-in that WRAPPED
+      // the anchor would change the bar's measured widths — which is exactly why the
+      // wrapper the real `HoverCard` inserts is taken out of layout in the stylesheet.
       HoverCard: ({ anchor }: { anchor: unknown }) => anchor,
-      // A tooltip clones its anchor and adds no box of its own; a stand-in that
-      // wrapped or dropped `children` would change the bar's measured widths.
-      Tooltip: ({ children }: { children: unknown }) => children,
     })
   }
   return stubModule()

@@ -428,9 +428,11 @@ test.describe('the shell_progress card in a real shell', () => {
           phase: row.getAttribute('data-phase'),
           tone: row.getAttribute('data-tone'),
           dot: dotNode === null ? null : getComputedStyle(dotNode).backgroundColor,
+          dotFilter: dotNode === null ? null : getComputedStyle(dotNode).filter,
           segmentPhase: segment?.getAttribute('data-phase') ?? null,
           segmentTone: segment?.getAttribute('data-tone') ?? null,
           segment: segment === undefined ? null : getComputedStyle(segment).backgroundColor,
+          segmentFilter: segment === undefined ? null : getComputedStyle(segment).filter,
         }
       })
     })
@@ -448,6 +450,17 @@ test.describe('the shell_progress card in a real shell', () => {
     // are `normal`. If every dot were the same colour, index-matching would have
     // passed without proving the palette is being followed.
     expect(dotColours.size, `every dot is one colour (${JSON.stringify([...dotColours])}), so state-following was not proved`).toBeGreaterThanOrEqual(2)
+    // AND BOTH SIDES ARE PAINTED AT THE SAME, CALMER SATURATION. The colours above are the
+    // theme's own semantic tokens; how vividly they are painted is `--step-saturation`,
+    // read at paint time by the dot and by every segment. It is asserted on both sides
+    // and against the value itself, so neither a return to full strength nor desaturating
+    // one half only can pass. (The pixel itself is the engine's filter pipeline; what the
+    // browser is asked here is that the filter is applied, and to what.)
+    for (const item of colours) {
+      expect(item.dotFilter, `row ${String(item.index + 1)} paints its dot at the palette's full saturation`).toBe('saturate(0.7)')
+      expect(item.segmentFilter, `row ${String(item.index + 1)} paints its segment at a different saturation than its dot`).toBe(item.dotFilter)
+    }
+    console.log(`[e2e] palette saturation dot=${String(colours[0]?.dotFilter)} segment=${String(colours[0]?.segmentFilter)}`)
 
 
     // The OUTPUT is dimmer than the command line in BOTH themes, and a hairline
@@ -545,7 +558,7 @@ test.describe('the shell_progress card in a real shell', () => {
       // colour is now BOTH halves of an absent border — no width, and no border STYLE.
       // The pair is what makes this a removal rather than a line that merely stopped
       // painting, and the divider the reader now sees is the one inside the segment
-      // tooltip, measured against its own rendered width in the bubble block below.
+      // hover card, measured against its own rendered width in the hover-card block below.
       expect(sample.dividerWidth, `the ${theme}-theme card body still draws a divider above the output`).toBe('0px')
       expect(sample.dividerStyle, `the ${theme}-theme output still carries a border style`).toBe('none')
     }
@@ -591,99 +604,138 @@ test.describe('the shell_progress card in a real shell', () => {
     // And nothing about the hover moves the text: no margin or padding takes part.
     expect(after, 'the hover moved the command text').toBe(before)
 
-    // The bubble carries that step's OUTPUT under its command line, with a DIVIDER
-    // between them. It is portaled to `document.body`, so it is read from the page
-    // rather than the card: the shell marks it `role="tooltip"`, and it is only in the
-    // DOM while showing. The visible one is taken by pseudo-class rather than by DOM
-    // order — the fixture also has a native card, and the tooltip that is SHOWING is
-    // the one this hover opened.
-    await page.waitForFunction(
-      () => [...document.querySelectorAll('[role="tooltip"]')]
-        .some((element) => getComputedStyle(element).visibility === 'visible'),
-      undefined,
-      { timeout: 10_000 },
-    )
-    const bubble = await page.locator('[role="tooltip"]:visible').first().evaluate((node) => {
-      const label = node.querySelector('span')
-      const text = node.textContent ?? ''
-      const lines = text.split('\n')
-      // What the label is MADE of. The shell's `Tooltip` prop is
-      // `label: string | (() => string)` and its bubble renders the resolved value as a
-      // text child, so a node — a divider element, a token span — cannot be here. The
-      // children are listed rather than assumed, which is what makes the absence of
-      // highlighting below a MEASUREMENT instead of a reading of the type.
-      const children = [...(label?.childNodes ?? [])].map((child) =>
-        child.nodeType === Node.TEXT_NODE ? '#text' : `<${(child as Element).tagName.toLowerCase()}>`)
-      /** The rendered width of one line, which is `[from, to)` inside the label's text. */
-      const widthOf = (from: number, to: number): number => {
-        const textNode = label?.firstChild
-        if (textNode === null || textNode === undefined || textNode.nodeType !== Node.TEXT_NODE) return -1
-        const range = document.createRange()
-        range.setStart(textNode, from)
-        range.setEnd(textNode, to)
-        return range.getBoundingClientRect().width
-      }
-      const widths: number[] = []
-      let start = 0
-      for (const line of lines) {
-        widths.push(widthOf(start, start + line.length))
-        start += line.length + 1
-      }
+    // The hover card carries that step's OUTPUT under its command line, with a real
+    // DIVIDER element between them — and the command line itself is syntax-highlighted
+    // there. It is the shell's `HoverCard`, portaled to `document.body` and carrying no
+    // role of its own, so it is found by the content this plugin renders
+    // (`data-step-card`) and by its parent — the portaled frame whose insets the
+    // measurement below is about. The pointer is still on the segment, so it is open.
+    const cardFrame = page.locator('body > div:has(> [data-step-card])').first()
+    await cardFrame.waitFor({ state: 'visible', timeout: 10_000 })
+    const hover = await cardFrame.evaluate((node) => {
+      const content = node.querySelector('[data-step-card]')
+      const command = node.querySelector('[data-card-command]')
+      const divider = node.querySelector('[data-card-divider]')
+      const output = node.querySelector('[data-card-output]')
+      const contentStyle = content === null ? null : getComputedStyle(content)
       return {
-        text,
-        lines,
-        widths,
-        whiteSpace: getComputedStyle(node).whiteSpace,
-        visibility: getComputedStyle(node).visibility,
-        children,
-        tokenSpans: label === null ? -1 : label.querySelectorAll('span[style]').length,
+        padding: contentStyle === null ? null : [contentStyle.paddingTop, contentStyle.paddingLeft],
+        contentWidth: content?.getBoundingClientRect().width ?? -1,
+        commandText: command?.textContent ?? null,
+        clockText: node.querySelector('[data-card-time]')?.textContent ?? null,
+        outputText: output?.textContent ?? null,
+        outputExists: output !== null,
+        divider: divider === null ? null : {
+          width: divider.getBoundingClientRect().width,
+          borderTop: getComputedStyle(divider).borderTopWidth,
+          colour: getComputedStyle(divider).borderTopColor,
+        },
+        background: getComputedStyle(node).backgroundColor,
+        // The command line's highlighted runs. The old string bubble measured ZERO here,
+        // because its `label` prop could not carry an element; the card's `content` is a
+        // ReactNode, so this number is the measurement that replaced that absence.
+        tokenSpans: command === null ? -1 : command.querySelectorAll('span[style]').length,
+        commandColour: command === null ? '' : getComputedStyle(command).color,
+        outputColour: output === null ? '' : getComputedStyle(output).color,
       }
     })
-    console.log(`[e2e] segment tooltip visible=${bubble.visibility} white-space=${bubble.whiteSpace} lines=${String(bubble.lines.length)} widths=${JSON.stringify(bubble.widths.map(round2))} children=${JSON.stringify(bubble.children)} tokenSpans=${String(bubble.tokenSpans)} ${JSON.stringify(bubble.text)}`)
-    expect(bubble.visibility, 'the segment\'s bubble is not visible').toBe('visible')
-    // `pre-line` is what makes the label's newline the line break the reader sees.
-    expect(bubble.whiteSpace, 'the bubble does not render the label\'s newlines').toBe('pre-line')
-    // EXACTLY the command line with its clock, then the divider, then that step's own
-    // output beneath it. 31 glyphs: the command line is 31 characters, so it is the
-    // widest line the rule is sized to.
-    expect(bubble.text, 'the bubble is not the step\'s command line, a divider and its own output').toBe(
-      `Write-Output "[1/4] fetch" [1s]\n${'\u2500'.repeat(31)}\n[1/4] fetch`,
-    )
-    // The divider inside the bubble is a REAL rendered line, not a character in the
-    // output: it has its own line, and its own measured width.
-    expect(bubble.lines[1], 'the bubble has no divider line between the command and the output').toMatch(/^\u2500+$/u)
-    expect(bubble.lines[1]?.length, 'the divider is not sized to the widest line it separates').toBe(31)
-    const dividerWidth = bubble.widths[1] ?? -1
-    const textWidth = Math.max(bubble.widths[0] ?? -1, bubble.widths[2] ?? -1)
-    expect(dividerWidth, 'the divider has no rendered width').toBeGreaterThan(0)
-    // Measured AGAINST THE TEXT it separates, in both directions: a rule far under the
-    // text reads as a stub, and one far over it widens the bubble for nothing. The
-    // window is generous on purpose — a box-drawing glyph's advance is not a
-    // proportional letter's — but it is a real bound either way.
-    expect(dividerWidth, `the divider is ${round2(dividerWidth)}px against ${round2(textWidth)}px of text: too short to read as a rule`).toBeGreaterThan(textWidth * 0.5)
-    expect(dividerWidth, `the divider is ${round2(dividerWidth)}px against ${round2(textWidth)}px of text: it widens the bubble for nothing`).toBeLessThan(textWidth * 2)
-    // AND SYNTAX HIGHLIGHTING IS NOT POSSIBLE HERE, measured: the label is a text node
-    // with no element children and no token span, so no highlighted run reached the
-    // bubble. The command line in the CARD is still highlighted — that is pinned
-    // further down — and this is where the two halves of that asymmetry are separated.
-    expect(bubble.children, 'the bubble has element children, so markup did reach the tooltip').toEqual(['#text'])
-    expect(bubble.tokenSpans, 'a token span reached the bubble, so the tooltip IS highlighted').toBe(0)
-    // A viewport shot, NOT `fullPage`: the bubble is `position: fixed` inside the body's
+    console.log(`[e2e] segment hover card padding ${JSON.stringify(hover.padding)} width ${round2(hover.contentWidth)} divider ${JSON.stringify(hover.divider)} tokenSpans ${String(hover.tokenSpans)} command ${JSON.stringify(hover.commandText)} output ${JSON.stringify(hover.outputText)}`)
+    expect(hover.padding, 'the hover card has no padding of its own').not.toBeNull()
+    // The insets were asked for, so they are measured against what the stylesheet
+    // declares rather than merely being non-zero.
+    expect(hover.padding?.[0], 'the card\'s top inset is not the declared one').toBe('10px')
+    expect(hover.padding?.[1], 'the card\'s side inset is not the declared one').toBe('12px')
+    // EXACTLY the step's own command line with its clock, as the expanded row shows it.
+    expect(hover.commandText, 'the card is not the step\'s own command line').toBe('Write-Output "[1/4] fetch"[1s]')
+    expect(hover.clockText, 'the card lost the step\'s clock').toBe('[1s]')
+    // The divider is a REAL rendered element between the two — the thing the string
+    // bubble could not carry — and it rules the card's own content box: the card is
+    // 24px of side inset wide, so the rule is that much narrower than the card.
+    expect(hover.divider, 'the card has no divider element').not.toBeNull()
+    expect(hover.divider?.borderTop, 'the card\'s divider draws no line').toBe('1px')
+    const expectedRule = hover.contentWidth - 24
+    expect(hover.divider?.width, `the divider is ${round2(hover.divider?.width ?? -1)}px inside a ${round2(hover.contentWidth)}px card`).toBeGreaterThan(expectedRule - 1)
+    expect(hover.divider?.width, `the divider is ${round2(hover.divider?.width ?? -1)}px inside a ${round2(hover.contentWidth)}px card`).toBeLessThan(expectedRule + 1)
+    // The step's own output, under that divider.
+    expect(hover.outputExists, 'the card has no output block').toBe(true)
+    expect(hover.outputText, 'the output under the divider is not this step\'s own').toBe('[1/4] fetch')
+    // AND SYNTAX HIGHLIGHTING DOES REACH IT: the command line carries token spans, which
+    // is what a node-valued `content` buys and a string-valued `label` could not. This is
+    // the assertion that replaced the one pinning the absence.
+    expect(hover.tokenSpans, 'the card\'s command carries no highlighted run').toBeGreaterThan(0)
+    // The output is DIMMER than the command, inside the same card, exactly as in the list.
+    expect(hover.outputColour, 'the output wears the command line\'s own colour').not.toBe(hover.commandColour)
+    // The divider is PAINTED, not merely declared: its colour is not the card's own
+    // background, so the 1px above is a visible line rather than an invisible one.
+    expect(hover.divider?.colour, 'the card\'s divider is painted in the card\'s own background colour').not.toBe(hover.background)
+    // AND THE CARD HUGS ITS SEGMENT. This is the assertion that catches the one mistake
+    // the widths cannot see: the card is positioned from the rect of the wrapper
+    // `HoverCard` inserts around the anchor, so a wrapper with NO box (the tempting
+    // `display: contents`) leaves the card at the top of the viewport — every width
+    // still correct, the card a whole row away from the segment the pointer is on.
+    const cardBox = await cardFrame.boundingBox()
+    const segmentBox = await segments.first().boundingBox()
+    const cardBottom = (cardBox?.y ?? 0) + (cardBox?.height ?? 0)
+    const segmentBottom = (segmentBox?.y ?? 0) + (segmentBox?.height ?? 0)
+    const gapAbove = (segmentBox?.y ?? 0) - cardBottom
+    const gapBelow = (cardBox?.y ?? 0) - segmentBottom
+    const distance = Math.min(Math.abs(gapAbove), Math.abs(gapBelow))
+    console.log(`[e2e] hover card anchor: card y ${round2(cardBox?.y ?? -1)}..${round2(cardBottom)} x ${round2(cardBox?.x ?? -1)} width ${round2(cardBox?.width ?? -1)}; segment y ${round2(segmentBox?.y ?? -1)}..${round2(segmentBottom)}; gap above ${round2(gapAbove)} below ${round2(gapBelow)}`)
+    expect(gapAbove >= 0 || gapBelow >= 0, `the card is neither above nor below its own segment (gaps ${round2(gapAbove)}/${round2(gapBelow)})`).toBe(true)
+    expect(distance, `the card sits ${round2(distance)}px from the segment it belongs to`).toBeLessThan(60)
+    // It is as wide as the BAR, not as wide as the one segment: the preview variant
+    // insets it 24px on each side of the element the card is measured against, which this
+    // plugin hands the TRACK. That is the room a command and its output get.
+    const trackBox = await card.locator('[role="progressbar"]').first().boundingBox()
+    const expectedWidth = (trackBox?.width ?? 0) - 48
+    console.log(`[e2e] hover card width ${round2(cardBox?.width ?? -1)} against the bar's ${round2(trackBox?.width ?? -1)}`)
+    expect(cardBox?.width ?? -1, 'the card is not as wide as the bar it belongs to').toBeGreaterThan(expectedWidth - 2)
+    expect(cardBox?.width ?? -1, 'the card is not as wide as the bar it belongs to').toBeLessThan(expectedWidth + 2)
+    // A viewport shot, NOT `fullPage`: the card is `position: fixed` inside the body's
     // portal, and the picture of it alongside the numbers is the human check that the
     // rule reads as a rule. It is taken while the pointer is still on the segment.
-    await page.screenshot({ path: SHOT.replace('.png', '-tooltip.png') })
+    await page.screenshot({ path: SHOT.replace('.png', '-hover-card.png') })
 
     // Hovering a segment LIFTS it — the bar's own answer to the pointer, and the cue
     // it wears when the LIST points at it. Pure vertical: no segment may ever change
     // width because of it.
+    //
+    // Three heights are separated here, because the bar got SLIMMER without its hot zone
+    // shrinking by a pixel: the element's BOX (the pointer target and the outline), the
+    // COLOUR painted inside it (box minus the 1.5px of top and bottom padding), and the
+    // wrapper `HoverCard` inserted around it (what opens the card). The padding is what
+    // moves the paint in without moving the box.
+    const segmentHeights = async (): Promise<{ box: number; painted: number; hot: number; clip: string }> =>
+      await segments.first().evaluate((node) => {
+        const style = getComputedStyle(node)
+        const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+        return {
+          box: node.getBoundingClientRect().height,
+          // `clientHeight` is the box without borders and scrollbars, so box minus the
+          // padding pair is exactly the area `background-clip: content-box` paints.
+          painted: node.clientHeight - padding,
+          hot: node.parentElement?.getBoundingClientRect().height ?? -1,
+          clip: style.backgroundClip,
+        }
+      })
     await page.mouse.move(0, 0)
     await page.waitForTimeout(120)
-    const flatSegment = (await segments.first().boundingBox())?.height ?? 0
+    const flat = await segmentHeights()
     await segments.first().hover()
     await page.waitForTimeout(120)
-    const liftedSegment = (await segments.first().boundingBox())?.height ?? 0
-    console.log(`[e2e] segment height ${String(flatSegment)} -> ${String(liftedSegment)} on hover`)
-    expect(liftedSegment, 'hovering a segment did not lift it').toBeGreaterThan(flatSegment)
+    const lifted = await segmentHeights()
+    console.log(`[e2e] segment heights flat ${JSON.stringify(flat)} -> hover ${JSON.stringify(lifted)}`)
+    // The COLOUR is what was asked to shrink: 4px at rest, 6px lifted, where the bar used
+    // to paint 9px and 13px. The clip is how the paint stays inside the padding box.
+    expect(flat.painted, 'the resting bar does not paint the 4px it is supposed to').toBe(4)
+    expect(lifted.painted, 'the lifted bar does not paint the 6px it is supposed to').toBe(6)
+    expect(flat.clip, 'the segment paints its padding too, so the bar is as tall as its box').toBe('content-box')
+    // AND THE HOT ZONE DID NOT SHRINK: the box is still the track's 9px, so every pixel
+    // of the pointer target the bar had before it still belongs to the segment.
+    expect(flat.box, 'the segment\'s pointer target got smaller with the painted bar').toBe(9)
+    expect(flat.hot, 'the wrapper that opens the card got smaller with the painted bar').toBeGreaterThanOrEqual(flat.box)
+    expect(lifted.box, 'hovering a segment did not lift it').toBeGreaterThan(flat.box)
+    expect(lifted.painted, 'the lifted segment did not grow in colour').toBeGreaterThan(flat.painted)
 
     // The DOT grows on hover, and it grows ABOUT ITS OWN CENTRE: the growth is a
     // transform, painted after layout, so the dot's box gets bigger while neither the

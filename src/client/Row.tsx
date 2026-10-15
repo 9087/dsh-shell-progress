@@ -188,6 +188,7 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
            */}
           <ProgressBar
             view={view}
+            toolName={toolName}
             labels={barLabels}
             onHoverStep={setLinkedStep}
             linkedStep={linkedStep}

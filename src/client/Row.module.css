@@ -27,6 +27,21 @@
   --step-state-done: var(--dsw-alias-state-success-primary);
   --step-state-slow: var(--dsw-alias-state-warn-primary);
   --step-state-error: var(--dsw-alias-state-error-primary);
+  /* How much of that palette's saturation is painted. A bar segment is a solid block of
+   * colour — only 4px tall, but the loudest thing in the card — and at full strength the
+   * theme's semantic green, amber and red shout next to the transcript's own quiet text.
+   * Read it down to 0.7 and the states still read as green/amber/red, just calmer.
+   *
+   * Declared ONCE, here with the colours, and read by the segment, the dot AND the
+   * single-fill bar: the dot and its segment have to stay the same colour (that is what
+   * the palette above is for), and the two bar shapes have to match each other.
+   *
+   * A paint-time FILTER rather than a pre-mixed colour on purpose. `color-mix()` or a
+   * relative colour would leave this custom property holding a value an older engine
+   * cannot parse, and an invalid `var()` substitution makes the property `unset` — a
+   * TRANSPARENT bar — instead of a merely calmer one. `saturate()` costs nothing and has
+   * been supported everywhere for years. */
+  --step-saturation: 0.7;
   /* The same two translucencies the bar uses, so a dot and its segment read as
    * the same material rather than as two colours that merely look close. */
   --step-alpha-pending: 0.5;

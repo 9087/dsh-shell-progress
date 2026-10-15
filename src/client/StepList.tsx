@@ -13,8 +13,9 @@
  * hover about its own centre — a transform, so nothing around it moves.
  *
  * The output below the command line starts on the command text's OWN column (no
- * indent of its own), is dimmer than the command, and is separated from it by a
- * hairline. There is no hover FILL anywhere in the row: the row's answer to the
+ * indent of its own) and is dimmer than the command. No hairline separates the two
+ * HERE: the divider lives in the segment's hover card instead, between the command
+ * and the output there (see `stepCard` in `ProgressBar.tsx`). There is no hover FILL anywhere in the row: the row's answer to the
  * pointer is the dot's growth and the bar's segment lift, not a background.
  *
  * @module dsh-shell-progress/client/StepList
@@ -22,7 +23,7 @@
 
 import type { ReactNode } from 'react'
 import { formatSeconds } from './ProgressBar.tsx'
-import { highlightCommand } from './highlight.ts'
+import { commandContent } from './command-text.tsx'
 import type { ProgressView, StepPhase, StepRow } from './model.ts'
 import styles from './StepList.module.css'
 
@@ -39,23 +40,6 @@ export interface StepListLabels {
   readonly statusRunning: string
   readonly statusPending: string
   readonly statusFailed: string
-}
-
-/**
- * A command line as highlighted runs, or as its own text when the tool's language is
- * unknown. Only the COMMAND is highlighted: a step's output is arbitrary terminal text
- * with no grammar, and colour that means nothing is worse than no colour.
- * @param text - the command.
- * @param toolName - the tool that ran it, which names the grammar.
- * @returns the nodes to render inside the line's `<pre>`.
- */
-function commandContent(text: string, toolName: string): ReactNode {
-  const runs = highlightCommand(text, toolName)
-  if (runs === undefined) return text
-  return runs.map((run, index) => (
-    // Index keys: the run list is positional and never reordered.
-    <span key={index} style={run.style}>{run.text}</span>
-  ))
 }
 
 /**
@@ -135,8 +119,8 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, onHover, la
        * folds output that exists; it hides a box that has nothing to show.
        *
        * Nothing separates the two in this BODY: the hairline that used to sit above
-       * the output is gone, and the divider now lives inside the segment tooltip,
-       * between the command line and the output there (see `bubbleLabel` in
+       * the output is gone, and the divider now lives inside the segment's hover card,
+       * between the command line and the output there (see `stepCard` in
        * `ProgressBar.tsx`). The dimmer colour is what tells them apart here.
        */}
       {row.output.trim() === '' ? null : (

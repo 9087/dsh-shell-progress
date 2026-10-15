@@ -75,22 +75,19 @@ function stub(extra: Record<string, unknown> = {}): unknown {
 function loaderRequire(id: string): unknown {
   if (id === '@deepseek-ai/dsh-client-ui-primitives') {
     return stub({
-      // A tooltip's anchor is ALWAYS visible, and the generic stand-in above
-      // renders `children` only for an OPEN disclosure — so without this entry
-      // every segment the bar draws disappeared from the tree. The label is
-      // rendered as a `title`, which is what the real bubble shows on hover and
-      // what the assertions below read back.
-      Tooltip: (props: Record<string, unknown>) => createElement(
+      // A hover card's anchor is ALWAYS visible, and the generic stand-in above
+      // differs from the Tooltip stand-in this replaces: a card's content is rendered
+      // only while the card is OPEN, and opening is a hover, which a static render
+      // never reaches. So the stand-in renders BOTH halves unconditionally — the
+      // anchor in place, the content inside a wrapper marked `data-card-host`, which
+      // is the seam the helpers below read one segment's card out of. Without this
+      // entry the generic stand-in above applies, and that one renders `children` only
+      // for an open disclosure, so every segment the bar draws would vanish.
+      HoverCard: (props: Record<string, unknown>) => createElement(
         'div',
-        {
-          // The real bubble builds its text when it becomes visible, and `label`
-          // accepts a RESOLVER for exactly that reason — so the stand-in calls it
-          // rather than stringifying a function.
-          title: typeof props.label === 'function'
-            ? String((props.label as () => string)())
-            : String(props.label),
-        },
-        props.children as never,
+        null,
+        props.anchor as never,
+        createElement('div', { 'data-card-host': 'true' }, props.content as never),
       ),
     })
   }
@@ -175,7 +172,7 @@ function singleStepBlock(): Record<string, unknown> {
 /**
  * The four-step settled call with each step's output REPLACED.
  *
- * The tooltip has three edges the four uniform fixture outputs never reach: output
+ * The card has three edges the four uniform fixture outputs never reach: output
  * that is empty, output that is far too long, and output whose characters happen to
  * look like markup.
  * @param outputs - one output per step, in order.
@@ -188,58 +185,65 @@ function withOutputs(outputs: readonly string[]): Record<string, unknown> {
   return block
 }
 
-/** The bubble's divider glyph, as the shipped bundle draws it. */
-const RULE_CHAR = '\u2500'
+/** The characters React escapes in a text child, back to the characters themselves. */
+function unescape(html: string): string {
+  return html
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&#x27;/gu, "'")
+    .replace(/&amp;/gu, '&')
+}
 
-/**
- * A run of divider glyphs, as it appears on the tooltip's own line.
- * @param count - how many glyphs.
- * @returns the line.
- */
-function rule(count: number): string {
-  return RULE_CHAR.repeat(count)
+/** One segment's hover card, as the shipped bundle renders it. */
+interface Card {
+  /** The command line's own text, with the clock taken off it. */
+  readonly command: string
+  /** The clock that line carries, or null when the step is still pending. */
+  readonly clock: string | null
+  /** The output block's RAW markup, so an escaping assertion can still see it. */
+  readonly output: string | null
+  /** True when the card drew a divider between the command and the output. */
+  readonly divider: boolean
+  /** How many highlighted runs the command line carries. */
+  readonly tokenSpans: number
 }
 
 /**
- * The first tooltip's title out of a rendered card — one segment's bubble.
+ * The hover cards in a rendered card, one per segment, in bar order.
+ *
+ * The `HoverCard` stand-in marks where each card's content begins
+ * (`data-card-host`), and the bar is the only thing this fixture renders, so the chunk
+ * after each marker is exactly one segment's card.
  * @param html - the rendered card.
- * @returns the title text, or an empty string when no tooltip rendered.
+ * @returns one entry per segment.
  */
-function firstTitle(html: string): string {
-  return [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')[0] ?? ''
-}
-
-/**
- * A settled call whose steps are exactly the given command and output, so the bubble's
- * divider can be measured against text this file chooses instead of the four-step
- * fixture's fixed commands. TWO steps, because a one-step call draws no bar at all
- * (`barShape` returns 'none' at `total <= 1`) and therefore no segment tooltip.
- * @param command - the step's command text.
- * @param output - the output that command produced.
- * @returns the call block.
- */
-function twoSteps(command: string, output: string): Record<string, unknown> {
-  return {
-    ...settledBlock(),
-    call: { name: 'shell_progress', argsRaw: JSON.stringify({ command: `${command}\n${command}` }) },
-    meta: {
-      v: 1,
-      instrumented: false,
-      refused: false,
-      partial: false,
-      preamble: '',
-      steps: [
-        { line: 1, text: command, output, startedAt: 0, endedAt: 0 },
-        { line: 2, text: command, output, startedAt: 0, endedAt: 0 },
-      ],
-    },
-  }
+function hoverCards(html: string): Card[] {
+  return html.split('data-card-host="true"').slice(1).map((chunk) => {
+    const line = /data-card-command="true">([\s\S]*?)<\/div>/u.exec(chunk)?.[1] ?? ''
+    // The clock is the LAST span of the command line, so the command's own text is
+    // everything before it.
+    const [beforeClock = '', clock = ''] = line.split(/(?=<span[^>]*data-card-time)/u)
+    return {
+      command: unescape(beforeClock.replace(/<[^>]*>/gu, '')),
+      clock: /\[([^\]]*)\]/u.exec(clock.replace(/<[^>]*>/gu, ''))?.[1] ?? null,
+      output: /data-card-output="true">([\s\S]*?)<\/pre>/u.exec(chunk)?.[1] ?? null,
+      divider: chunk.includes('data-card-divider="true"'),
+      // A highlighted run is a span carrying colour; the clock is stripped off above,
+      // so every span counted here is a Shiki token.
+      tokenSpans: (beforeClock.match(/<span style=/gu) ?? []).length,
+    }
+  })
 }
 
 /** Register the card out of the bundle and render it for one settled call. */
 async function renderCard(
   block: Record<string, unknown> = settledBlock(),
   live?: Record<string, unknown>,
+  // The tool name picks the highlighting grammar. `shell_progress` is deliberately not
+  // one of the two registered tools, so the DEFAULT fixture is the plain-text path; the
+  // tests about highlighting pass a real tool name, exactly as the host does.
+  toolName = 'shell_progress',
 ): Promise<string> {
   const entry = await loadBundle()
   const module = entry.factory(loaderRequire) as { apply: (ctx: unknown) => void }
@@ -260,7 +264,7 @@ async function renderCard(
   const Component = registrations[0]?.component as (props: unknown) => unknown
   const props = {
     callId: 'call-1',
-    toolName: 'shell_progress',
+    toolName,
     phase: 'result',
     block,
     t: (key: string, params?: Record<string, unknown>) => {
@@ -301,8 +305,10 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(styles).toHaveLength(3)
     const css = styles.map((node) => node.textContent ?? '').join('\n')
     // The two declarations that make the bar visible. Their absence is the exact
-    // regression this suite exists for.
-    expect(css).toContain('height:6px')
+    // regression this suite exists for: a rendered height and a width FLOOR. (The track
+    // keeps the 9px the row is measured from; how much of it each bar SHAPE paints is
+    // pinned by the shape test below.)
+    expect(css).toContain('height:9px')
     expect(css).toContain('min-width:48px')
     // A loaded token, so the segments are not merely transparent.
     expect(css).toContain('--dsw-alias-state-success-primary')
@@ -330,6 +336,23 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
       expect(declared, `--step-alpha-${state} is declared ${String(declared)} times, not once`).toBe(1)
       expect(consumed, `--step-alpha-${state} is read by ${String(consumed)} rules`).toBeGreaterThanOrEqual(2)
     }
+    // And how VIVID that palette is painted is shared the same way: declared once, on the
+    // card with the colours, and read by all three places that paint a step's state —
+    // the segment, the dot and the single-fill bar — because a dot that stayed vivid
+    // beside a calmer segment is precisely the drift the palette prevents.
+    const saturation = paletteUse(css, '--step-saturation')
+    expect(saturation.declared, 'the palette saturation is not declared exactly once').toBe(1)
+    expect(
+      saturation.consumed,
+      `the palette saturation is read by ${String(saturation.consumed)} rules — the segment, the dot and the solid bar must all read it`,
+    ).toBe(3)
+    expect(css, 'the palette saturation is not the calmer value').toContain('--step-saturation:.7')
+    // It is applied as a FILTER, not baked into a colour: every consumer is a
+    // `saturate()` on a rule that also paints one of the palette's tokens.
+    expect(
+      css.match(/filter:saturate\(var\(--step-saturation/gu) ?? [],
+      'the saturation is not applied as a filter, so an engine that cannot parse the value would paint a transparent bar',
+    ).toHaveLength(3)
   })
 
   // The removal pins. The `>` marker, the border-drawn caret and its rotation are
@@ -402,14 +425,19 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // fill token is gone from this plugin's stylesheets entirely.
     expect(css, 'the row still paints the theme\'s hover fill').not.toContain('--dsw-alias-interactive-bg-hover')
     // NO divider in the card body. The hairline that used to sit above the output is
-    // gone — the tooltip carries that divider instead, pinned in the bubble tests
-    // below — and the design system's border step is not referenced anywhere, so the
-    // removal is a removal rather than a rule that merely stopped painting.
+    // gone — the CARD carries that divider instead, pinned in the hover-card tests
+    // below — and so is the output block's own top border, so the removal is a removal
+    // rather than a rule that merely stopped painting.
     const outputRule = /(?:^|\})\.([A-Za-z0-9_-]*_output)\{([^}]*)\}/.exec(css)
     expect(outputRule, 'the output has no rule of its own').not.toBeNull()
     const outputBody = outputRule?.[2] ?? ''
     expect(outputBody, 'the card body still draws a divider above the output').not.toContain('border-top')
-    expect(css, 'the divider token is still in the stylesheet').not.toContain('--dsw-alias-border-l3')
+    // The design system's border step is the CARD's divider token now, and it is used
+    // exactly ONCE: a second reference would mean a second hairline came back somewhere
+    // the reader is not hovering. Counted, because "the token appears in the stylesheet"
+    // is not the claim being made.
+    const dividerUses = css.match(/var\(--dsw-alias-border-l3/gu) ?? []
+    expect(dividerUses, 'the divider token is used by something other than the card\'s rule').toHaveLength(1)
     expect(outputBody, 'the output is not dimmer than the command').toContain('color:var(--dsw-alias-label-caption')
     expect(outputBody, 'the output still wears the command line\'s own colour').not.toContain('color:var(--dsw-alias-label-primary')
     // The `:empty` rule that existed for the divider is gone with it, and the spacing
@@ -418,6 +446,25 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // that printed nothing.
     expect(css, 'the dropped `:empty` rule is still in the stylesheet').not.toMatch(/:empty\{/u)
     expect(css, 'an empty output would take up blank room again').toMatch(/_output[A-Za-z0-9_-]*:not\(:empty\)\{/u)
+    // The BAR is slimmer than its own box, and this is the CSS half of "smaller, with the
+    // hot zone intact": the segment clips its paint to the content box and takes 1.5px of
+    // top and bottom padding to make the difference, while its box — the pointer target —
+    // stays the track's 9px. The pixels themselves are measured in a browser.
+    const segmentRule = /_segment\{([^}]*)\}/u.exec(css)
+    expect(segmentRule, 'the segment has no rule of its own').not.toBeNull()
+    const segmentBody = segmentRule?.[1] ?? ''
+    expect(segmentBody, 'the segment paints its padding, so the bar is as tall as its box').toContain('background-clip:content-box')
+    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:2.5px 0')
+    expect(segmentBody, 'the padding would grow the box instead of insetting the paint').toContain('box-sizing:border-box')
+    expect(segmentBody, 'the segment no longer fills the track').toContain('height:100%')
+    const trackRule = /_track\{([^}]*)\}/u.exec(css)
+    expect(trackRule?.[1], 'the track no longer keeps the 9px the row and the card anchor are measured from').toContain('height:9px')
+    // The lifted state shrank with it: 11px of box is 6px of colour where 13px used to be.
+    const liftRule = /_segment:hover[^{]*\{([^}]*)\}/u.exec(css)
+    expect(liftRule?.[1], 'the lifted segment is not the smaller 11px box').toBe('height:11px')
+    // The other bar shape follows the same painted height, so switching shapes does not
+    // change how thick the bar looks.
+    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thin as the segmented one').toContain('height:4px')
   })
 
   it('draws one segment per step, each with an accessible name, its command and its output', async () => {
@@ -428,92 +475,91 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(html).toContain('aria-valuenow="4"')
     // Hovering a segment shows the STEP'S OWN COMMAND, ITS TIME AND ITS OUTPUT — the
     // same things the expanded row shows, one above the other. Its source line number
-    // is deliberately NOT in the bubble: the card points at the matching row instead.
-    expect(html).toContain('title=')
-    expect(html).toContain('[1/4] fetch')
-    expect(html).toContain('[0s]')
+    // is deliberately NOT in the card: the card points at the matching row instead.
+    const cards = hoverCards(html)
+    expect(cards, 'the bar did not render one hover card per segment').toHaveLength(4)
+    expect(cards[0]?.command, 'the first segment\'s card does not carry its command').toBe('Write-Output "[1/4] fetch"')
+    expect(cards[0]?.clock, 'the first segment\'s card does not carry its clock').toBe('0s')
   })
 
-  // The bubble's new half. The shell's own bubble is `white-space: pre-line`, so a
-  // `\n` in the label is the line break the reader sees — and the label is a STRING
-  // rendered as a text child, so nothing in the output can become markup, and no
-  // DIVIDER can be an element either. The stub in this file renders that label into a
-  // `title` attribute, which is the same string.
+  // The hover card's own half. It is the shell's `HoverCard`, the same primitive the
+  // session list's rows use, and its `content` is a ReactNode — which is what makes BOTH
+  // of the things the old string bubble could not carry possible: a DIVIDER that is a
+  // real element, and a command line that is syntax-highlighted.
 
-  it('puts the step\'s own output in its segment tooltip, under a divider', async () => {
+  it('puts the step\'s own output in its segment card, under a real divider', async () => {
     const html = await renderCard()
-    const titles = [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')
-    expect(titles, 'the bar did not render one tooltip per segment').toHaveLength(4)
-    // Command line (with the clock) first, then the divider, then the step's output.
-    // 31 glyphs is the widest line here — the command with its clock — because the
-    // shell's `Tooltip` takes a string and can carry no element that could draw a rule.
-    expect(titles[0], 'the first step\'s tooltip is not its command, a divider and its output').toBe(
-      `Write-Output &quot;[1/4] fetch&quot; [0s]\n${rule(31)}\n[1/4] fetch`,
-    )
-    // The third step's command is one character shorter (`test`, not `fetch`), so its
-    // rule is one glyph shorter: the divider follows the text it separates.
-    expect(titles[2], 'the third step\'s tooltip is not its own command, a divider and its output').toBe(
-      `Write-Output &quot;[3/4] test&quot; [0s]\n${rule(30)}\n[3/4] test`,
-    )
-    // The divider is its OWN line between the two, not a prefix on the output: line 2
-    // is nothing but box-drawing glyphs, and the output follows on line 3. The widths
-    // are the widest line in each bubble — the command with its clock, 31 characters
-    // for `fetch`/`build` and 30 for `test`/`pack`.
+    const cards = hoverCards(html)
+    expect(cards, 'the bar did not render one hover card per segment').toHaveLength(4)
+    // The command line (with its clock), a divider, then that step's OWN output — for
+    // every step, not just the first: each card reads the step it belongs to.
     const steps = [
-      { output: '[1/4] fetch', divider: 31 },
-      { output: '[2/4] build', divider: 31 },
-      { output: '[3/4] test', divider: 30 },
-      { output: '[4/4] pack', divider: 30 },
+      { command: 'Write-Output "[1/4] fetch"', output: '[1/4] fetch' },
+      { command: 'Write-Output "[2/4] build"', output: '[2/4] build' },
+      { command: 'Write-Output "[3/4] test"', output: '[3/4] test' },
+      { command: 'Write-Output "[4/4] pack"', output: '[4/4] pack' },
     ]
-    titles.forEach((title, index) => {
-      const lines = title.split('\n')
-      expect(lines[1], `segment ${String(index + 1)} has no divider line`).toMatch(/^\u2500+$/u)
-      expect(lines[1]?.length, `segment ${String(index + 1)}'s divider is not sized to the widest line`).toBe(steps[index]?.divider)
-      expect(lines[2], `segment ${String(index + 1)}'s output is not under the divider`).toBe(steps[index]?.output)
+    cards.forEach((card, index) => {
+      const step = steps[index]
+      expect(card.command, `segment ${String(index + 1)}'s card is not its own command`).toBe(step?.command)
+      expect(card.clock, `segment ${String(index + 1)}'s card lost its clock`).toBe('0s')
+      expect(card.divider, `segment ${String(index + 1)}'s card has no divider between the command and the output`).toBe(true)
+      expect(card.output, `segment ${String(index + 1)}'s output is not under the divider`).toBe(step?.output)
     })
   })
 
-  it('sizes the tooltip divider to the widest line, with a floor and a ceiling', async () => {
-    // A one-character command: the clock still rides on the line, and the rule stops at
-    // its floor rather than shrinking to a stray dash.
-    const short = await renderCard(twoSteps('x', 'y'))
-    expect(firstTitle(short).split('\n')[1], 'the divider shrank below its floor').toBe(rule(8))
-    // A command far past the ceiling: the rule is capped, so a long line cannot turn
-    // the bubble into a slab.
-    const long = await renderCard(twoSteps('z'.repeat(300), 'w'))
-    expect(firstTitle(long).split('\n')[1], 'the divider grew past its ceiling').toBe(rule(48))
+  it('highlights the command inside the segment card, exactly as the step list does', async () => {
+    const cards = hoverCards(await renderCard(settledBlock(), undefined, 'shell_progress_pwsh'))
+    // The divider is not the only thing the node form buys: the command is highlighted
+    // by language HERE too, because both views render the same `commandContent`. The
+    // string bubble this replaced could carry no token span at all — that asymmetry was
+    // measured in a browser, and this is the assertion that replaced it.
+    expect(cards[0]?.tokenSpans, 'the card\'s command carries no highlighted run').toBeGreaterThan(0)
   })
 
-  it('keeps empty, long and markup-bearing output safe in the tooltip', async () => {
+  // The divider rules the CARD, which is a stylesheet fact rather than a string length:
+  // the glyph run the old bubble had to count — with its own floor and ceiling — is gone
+  // with the string prop that forced it.
+  it('rules the card\'s divider across the card, with no glyph run left', async () => {
+    const css = await injectedCss()
+    const ruleBody = /_cardRule\{([^}]*)\}/u.exec(css)?.[1] ?? ''
+    expect(ruleBody, 'the card has no divider rule of its own').not.toBe('')
+    expect(ruleBody, 'the card\'s divider is not a border').toContain('border-top:1px solid var(--dsw-alias-border-l3')
+    // `<hr>` ships a full border box in every engine's UA sheet; only the top edge is wanted.
+    expect(ruleBody, 'the `<hr>` kept the engine\'s own border box').toContain('border:0')
+    expect(css, 'the box-drawing glyph run is still somewhere in the stylesheet').not.toContain('\u2500')
+  })
+
+  it('keeps empty, long and markup-bearing output safe in the card', async () => {
     const html = await renderCard(withOutputs([
       '<script>alert("x")</script> & done',
       '',
       Array.from({ length: 12 }, (_, index) => `line ${String(index + 1)}`).join('\n'),
       'x'.repeat(600),
     ]))
-    const titles = [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1] ?? '')
-    expect(titles).toHaveLength(4)
-    // Markup characters are characters of a string child: React escapes them, so the
-    // output is READ as text and no element is created out of it.
-    expect(titles[0], 'the output\'s markup characters were not escaped').toContain(
+    const cards = hoverCards(html)
+    expect(cards).toHaveLength(4)
+    // Markup characters are characters of a text child: React escapes them, so the output
+    // is READ as text and no element is created out of it. Asserted against the RAW
+    // markup, which is what keeps the escaping visible rather than undone by a helper.
+    expect(cards[0]?.output, 'the output\'s markup characters were not escaped').toContain(
       '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; done',
     )
     expect(html, 'output was rendered as markup').not.toContain('<script>')
-    // Empty output adds NO second line — not a blank one — and so no divider either:
-    // a divider with nothing under it would be a rule across nothing.
-    expect(titles[1], 'an empty output left a dangling line in the bubble').toBe(
-      'Write-Output &quot;[2/4] build&quot; [0s]',
-    )
-    // Long output is clamped by LINE, and says how much it hid: the command line, the
-    // divider, six output lines, then the count line — so line nine is never silently
-    // missing. (The divider is the one line this change added inside the bubble.)
-    expect(titles[2]?.split('\n'), 'the tooltip did not clamp a 12-line output to six lines plus a count').toHaveLength(9)
-    expect(titles[2]?.split('\n')[1], 'the clamped bubble lost its divider').toBe(rule(30))
-    expect(titles[2], 'the tooltip does not say how many lines it hid').toContain('… 6 more lines')
-    // ...and one enormous single line is clamped by CHARACTER, so it cannot become a
-    // slab taller than the viewport.
-    expect(titles[3]?.endsWith('…'), 'a 600-character output line was not clamped').toBe(true)
-    expect((titles[3] ?? '').length, 'the clamped tooltip is still unbounded').toBeLessThan(500)
+    // Empty output draws NO output block and NO divider: a divider with nothing under it
+    // would be a rule across nothing.
+    expect(cards[1]?.output, 'an empty output still drew an output block').toBeNull()
+    expect(cards[1]?.divider, 'an empty output still drew a divider').toBe(false)
+    // Long output is clamped by LINE, and says how much it hid: six lines, then the count,
+    // so the seventh is never silently missing.
+    const clamped = unescape(cards[2]?.output ?? '')
+    expect(clamped.split('\n'), 'the card did not clamp a 12-line output to six lines plus a count').toHaveLength(7)
+    expect(clamped, 'the card does not say how many lines it hid').toContain('… 6 more lines')
+    // ...and one enormous single line is clamped by CHARACTER, so it cannot become a slab
+    // taller than the card's own cap.
+    const wide = unescape(cards[3]?.output ?? '')
+    expect(wide.endsWith('…'), 'a 600-character output line was not clamped').toBe(true)
+    expect(wide.length, 'the clamped output is still unbounded').toBeLessThan(500)
   })
 
   it('puts a real hashed class on the track, so the layout is not unstyled', async () => {
