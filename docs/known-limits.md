@@ -95,12 +95,15 @@ softened: an unverified entry says so.
      consumer's `auto-install-peers` setting cannot re-add it, because optional
      peers are not auto-installed under any value of that setting.
 
-8. There is no cross-host-version smoke test yet. **to fix — see task B**
+8. There is no cross-host-version smoke test yet. **closed — the job has run green**
    - Evidence: before this change, no workflow in `.github/workflows/` ran a
      smoke suite against a harness version other than the pinned devDeps. This
-     change adds that job (`.github/workflows/harness-matrix.yml`); its exact
-     command sequence was run locally and passed, but the JOB has never
-     executed, so this stays open until a CI run exists.
+     change adds that job (`.github/workflows/harness-matrix.yml`), and the
+     release it shipped in is the first CI run to execute it: both entries are
+     green on commit `96b5316` — `smoke (0.2.0-rc.2, true)`, the BLOCKING set
+     (check run 116585960444), and `smoke (0.2.1-alpha.3, false)`, the
+     non-blocking probe (116585959830). The gate earned its keep getting there:
+     the run that first reached it found a real POSIX defect (entry 11).
    - Operational note: the job's BLOCKING set currently holds one entry,
      `0.2.0-rc.2`, because it is the only published version inside the declared
      peer range (`^0.2.0-rc.2`). The newest published version rides beside it as
