@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/9087/dsh-shell-progress/compare/v0.1.1...v0.2.0) (2026-10-15)
+
+### Features
+
+* **client:** open a real hover card on a segment, and calm the bar ([34415f5](https://github.com/9087/dsh-shell-progress/commit/34415f5b9dad20cca7c4a2e3f2fa312ac236ae85))
+* plan steps with each shell's own parser, and refuse instead of guessing ([c47d94c](https://github.com/9087/dsh-shell-progress/commit/c47d94cba0a4fa91194f9cac902a00fbee219647))
+
+### Bug Fixes
+
+* **client:** align the progress line with the list, and stop padding empty output ([ce52c42](https://github.com/9087/dsh-shell-progress/commit/ce52c42d80d5a828570dce298db3c08a19cbd857))
+
 ## [0.1.1](https://github.com/9087/dsh-shell-progress/compare/v0.1.0...v0.1.1) (2026-10-14)
 
 ### Bug Fixes

@@ -1,6 +1,6 @@
 {
   "name": "dsh-shell-progress",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "DeepSeek Harness plugin: a segmented progress bar for multi-step PowerShell tool calls",
   "packageManager": "pnpm@11.22.0",
   "engines": {
@@ -73,11 +73,21 @@
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-llm": { "optional": true },
-    "@deepseek-ai/dsh-sandbox": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true },
-    "@deepseek-ai/schemastery": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sandbox": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
