@@ -144,3 +144,29 @@ softened: an unverified entry says so.
       ```
       node --experimental-transform-types --input-type=module -e "const {splitSteps} = await import('./src/split.ts'); console.log(JSON.stringify(splitSteps(['echo a |','cat'].join('\n'))))"
       ```
+
+11. The PowerShell candidate list was WINDOWS-ONLY, so on a POSIX host the pwsh
+    planner never resolved a shell and every multi-step command was REFUSED — the
+    instrumented path did not exist there at all. **closed — covered by a test**
+    - Found by the first tag-triggered CI run (Release run 38781014702): it failed
+      at `pnpm test` on `ubuntu-latest` while the same suite was green on Windows,
+      in `tests/pwshtree.spec.ts` — `instrumented` was `false` where a plan was
+      expected, and a refusal's step list was empty (`expected 0 to be greater
+      than 1`). The refusal-path tests in that same file passed on Linux for
+      exactly that reason, which is what pointed at the resolver rather than at
+      the planner.
+    - The cause: `src/pwsh-path.ts` split `PATH` on `;`, appended `pwsh.exe`,
+      probed `C:\Program Files\PowerShell\7` and fell back to the in-box
+      `powershell.exe`. On Linux `PATH` is `:`-separated, so the whole variable
+      became ONE candidate and every probe missed; `resolvePowershell()` answered
+      `undefined`, which `resolveSplit` turns into a refusal — by design, and
+      therefore SILENT: the card simply showed no bar.
+    - The fix: the list is built for a PLATFORM (now a parameter) using
+      `path.win32`/`path.posix`, `pwsh.exe` versus `pwsh`, `;` versus `:`, and the
+      POSIX install locations plus a bare `pwsh` as the last candidate. The
+      Windows order is unchanged.
+    - Evidence: `tests/pwsh-path.spec.ts` asserts both lists on either host and
+      spawns nothing, so it runs on Windows and on the Linux runner that found
+      this. The Windows side is measured green here (`pnpm test`, 19 files / 305
+      tests, plus the e2e). The Linux side is what the CI run for this fix
+      verifies, and it is NOT claimed before that run is green.
