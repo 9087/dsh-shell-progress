@@ -1146,6 +1146,13 @@ test.describe('the shell_progress card in a real shell', () => {
       notes: node.querySelectorAll('[data-truncated="true"]').length,
     }))
     console.log(`[e2e] truncation ${JSON.stringify(truncation)}`)
+    // A viewport shot with the note in view, for the human check: the step's output ends,
+    // and the cut is stated under it. NOT `fullPage` — the kept output is 8k characters
+    // tall, and the point of the picture is the line the reader would actually see.
+    await truncated.locator('[data-truncated="true"]').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: SHOT.replace('.png', '-truncated.png') })
+    console.log(`[e2e] truncation shot -> ${SHOT.replace('.png', '-truncated.png')}`)
+
     // The count is a REAL number, not a token ellipsis: the step prints ~40k characters
     // into a budget of 8192, so thousands are missing.
     const dropped = Number(/(\d+)/u.exec(truncation.note ?? '')?.[1] ?? '0')

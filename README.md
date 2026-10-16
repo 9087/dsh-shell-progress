@@ -24,16 +24,7 @@ One call, one card — photographed mid-run, not drawn by hand:
      `pnpm run e2e` rewrites it, so this URL follows the code. -->
 ![The card while a four-step command runs: a partly filled segmented bar with the step in flight and its clock, the finished step's output beneath it, and the steps still to come](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.png)
 
-*The real card, expanded, with `1/4` done and step 2 in flight. The picture is taken and
-cropped by `pnpm run e2e` (see `docs/assets/`), so it cannot drift from the code it
-documents — re-running the suite rewrites it, and the clock inside reads whatever the
-step had reached at that instant.*
-
-A Chinese rendering of the same card, for the `*.zh.*` convention a `README.zh.md` would
-use, lives beside it as [`docs/assets/running.zh.png`](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.zh.png). Both
-come out of the same run: the card's title is the shell's own text, so each figure is shot
-against a host whose STORED `locale.preference` says which language to draw — the client's
-browser-derived language is only provisional and that preference replaces it.
+*The real card, expanded, with `1/4` done and step 2 in flight.*
 
 The question it answers is *"is this command still working, or is it stuck?"* —
 so the live position is the feature, not a bonus. The bar lives in the

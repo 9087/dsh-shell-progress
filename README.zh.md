@@ -21,13 +21,7 @@
      `pnpm run e2e` 每次重写，所以这个 URL 会跟着代码走。 -->
 ![四步命令运行中的卡片：分段进度条部分填满、正在执行的那一步带着计时、已完成步骤的输出在其下方，后面是尚未开始的步骤](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.zh.png)
 
-*真实的卡片（展开态），`1/4` 已完成、第 2 步执行中。这张图由 `pnpm run e2e` 截图并裁切（见
-`docs/assets/`），所以它不会和代码脱节——重跑测试套件就会重写它，图里的计时读数是截图那一刻
-该步恰好跑到的秒数。*
-
-英文版同一张图在 [`docs/assets/running.png`](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/running.png)。两张图出自同一次运行：
-卡片的标题是**宿主自己的文案**，所以每张图都是在一个「宿主设置里写明语言」的实例上拍的——
-客户端从浏览器推导出的语言只是临时值，会被宿主存下来的 `locale.preference` 覆盖。
+*真实的卡片（展开态），`1/4` 已完成、第 2 步执行中。*
 
 它回答的问题是*「这条命令还在跑，还是卡住了？」*——所以实时位置是功能本身，不是附赠品。
 进度条位于**收起态**的卡片里：扫一眼对话流就够了，把它藏进折叠区就变成了两步交互。
