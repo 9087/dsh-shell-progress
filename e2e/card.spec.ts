@@ -67,6 +67,13 @@ const LIVE_CALL_ZH = 'call-live-zh-1'
  * state that count where the cut is — a truncated step must not read as a quiet one.
  */
 const TRUNCATED_CALL = 'call-live-truncated-1'
+
+/**
+ * A call the host REFUSED to instrument — PowerShell's planner reports a syntax error — so
+ * nothing is marked and the command runs as written. The card has no step to point at, and
+ * must degrade to the plain shape: the command and its output, no bar, no counter, no rows.
+ */
+const REFUSED_CALL = 'call-live-refused-1'
 const MARKER = 'SHELL_PROGRESS_E2E_SESSION='
 
 /** One step's segment count and the numbers that decide "is this laid out". */
@@ -1342,6 +1349,46 @@ test.describe('the shell_progress card in a real shell', () => {
       await live.locator('[data-truncated="true"]').count(),
       'a card of complete steps carries a truncation note',
     ).toBe(0)
+    // ---------------------------------------------------------------------------
+    // THE PLAIN CARD. A refused command was never instrumented, so there is no step to
+    // point at and the host reports none. The card draws the command and everything the
+    // command printed, and NOTHING that only a tracked run can have: no progress line, no
+    // counter, no step row. The planner's best-effort step list is dropped rather than
+    // rendered as rows that could only ever read "pending".
+    // ---------------------------------------------------------------------------
+    const refused = page.locator(`[data-chat-call-id="${REFUSED_CALL}"]`)
+    await expect(refused, 'the fixture never rendered the refused card').toBeAttached({ timeout: 60_000 })
+    await revealCard(refused)
+    await refused.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
+    await revealCard(refused)
+    await expect(
+      refused.locator('[data-plain-body="true"]'),
+      'a refused card drew no plain body',
+    ).toBeAttached({ timeout: 60_000 })
+    const refusal = await refused.evaluate((node) => {
+      const body = node.querySelector('[data-plain-body="true"]')
+      return {
+        command: body?.querySelector('[data-code="true"]')?.textContent ?? null,
+        output: body?.querySelector('[data-output="true"]')?.textContent ?? null,
+        progressLines: node.querySelectorAll('[data-progress-line="true"]').length,
+        counters: node.querySelectorAll('[data-counter="true"]').length,
+        rows: node.querySelectorAll('[data-phase]').length,
+        dots: body?.querySelectorAll('[data-dot="true"]').length ?? -1,
+      }
+    })
+    console.log(`[e2e] refusal ${JSON.stringify(refusal)}`)
+    // What the card must still say: the command, and the output the command produced.
+    expect(refusal.command, 'the plain body does not carry the command').toContain('Write-Output "alpha"')
+    expect((refusal.output ?? '').length, 'the plain body lost the output').toBeGreaterThan(0)
+    // And what it must NOT: the bar, the counter, the rows, the step dots.
+    expect(refusal.progressLines, 'a refused card drew a progress line').toBe(0)
+    expect(refusal.counters, 'a refused card drew a counter').toBe(0)
+    expect(refusal.rows, 'a refused card drew step rows').toBe(0)
+    expect(refusal.dots, 'a refused card drew a step dot').toBe(0)
+    // The plain body in view, for the human check.
+    await refused.locator('[data-plain-body="true"]').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: SHOT.replace('.png', '-refused.png') })
+    console.log(`[e2e] refusal shot -> ${SHOT.replace('.png', '-refused.png')}`)
   })
 })
 

@@ -37,7 +37,7 @@ import type { LiveSnapshot } from '../types.ts'
 import { NS } from './locales.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
-import { StepList } from './StepList.tsx'
+import { PlainBody, StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
 import { argsOf, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled } from './model.ts'
 import type { ProgressView } from './model.ts'
@@ -131,22 +131,17 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
     statusFailed: t('status.failed'),
   }
 
-  // Both notices describe a SETTLED run: while a call is in flight the host may
-  // simply not have answered yet, and claiming "ran unmodified" then would be
-  // wrong.
-  //
-  // The unmodified notice hangs on the refusal FLAG, never on the step count. It
-  // used to read `view.total > 1`, a proxy that held only while a refused command
-  // still carried the heuristic's guessed steps: now that a refusal plans NO step
-  // (a refusal is not a guess), such a card's total is 0 and a count would make
-  // the notice disappear — silently, which is exactly the regression this flag
-  // exists to prevent. `!view.instrumented` is kept beside it because the notice
-  // claims the command ran unmodified, which cannot be true of an instrumented run.
-  const notice = settled && view.refused && !view.instrumented
-    ? t('row.notInstrumented')
-    : settled && view.partial
-      ? t('row.partial')
-      : undefined
+  // The only notice left is about LOST OUTPUT. The other one — "this command ran
+  // unmodified" — is gone on purpose: a refused call now renders the plain body below
+  // (`PlainBody`) instead of a bar and a step list, which says the same thing by showing no
+  // progress line at all, and WHY it was refused goes to the host log, where a reader who
+  // wants the reason can find it.
+  const notice = settled && view.partial ? t('row.partial') : undefined
+
+  // A refused command ran WITHOUT instrumentation, so the host reports no steps for it: the
+  // card keeps its header, shows no bar, no counter and no rows, and renders the command and
+  // its output as one block.
+  const plain = view.refused && !view.instrumented
 
 
   return (
@@ -155,7 +150,7 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
         icon={<PromptGlyph />}
         title={t('row.title', { tool: toolName })}
         open={open}
-        expandable={view.total > 0}
+        expandable={view.total > 0 || plain}
         onToggle={() => { setOpen((previous) => !previous) }}
         running={view.running}
         expandOnRowClick
@@ -204,13 +199,22 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
           view to reach step four is not what expanding a row should do. */}
       {open ? (
         <div className={styles.steps}>
-          <StepList
-            view={view}
-            toolName={toolName}
-            labels={listLabels}
-            hoveredIndex={linkedStep}
-            onHoverStep={setLinkedStep}
-          />
+          {plain ? (
+            <PlainBody
+              command={args.command}
+              output={view.preamble}
+              toolName={toolName}
+              outputLabel={listLabels.outputLabel}
+            />
+          ) : (
+            <StepList
+              view={view}
+              toolName={toolName}
+              labels={listLabels}
+              hoveredIndex={linkedStep}
+              onHoverStep={setLinkedStep}
+            />
+          )}
         </div>
       ) : null}
     </div>

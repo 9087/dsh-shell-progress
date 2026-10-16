@@ -133,6 +133,12 @@ The command runs **unmodified** — and no marker is written — when any of the
 - the resolved sandbox mode is `read-only`;
 - the command splits into more than `maxSteps` steps.
 
+A refused call's card is the **plain** one: the command and everything it printed, with no bar,
+no counter and no step rows. There is nothing to draw — no marker was written, so no step has
+a time or an output of its own, and the planner's best-effort step list is dropped rather than
+rendered as rows that could only ever read "pending". The reason for the refusal goes to the
+**host log** (`shell-progress: running the command unmodified — …`), not onto the card.
+
 A command with **one step** is uninstrumented too — there is no order to keep, so there
 is nothing to mark — but its card is not degraded: the host stamps that step's own start
 and end, so the bar draws its single segment and it goes pending → running → done with

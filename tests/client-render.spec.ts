@@ -139,16 +139,29 @@ function settledBlock(): Record<string, unknown> {
 }
 
 /**
- * A settled call the host REFUSED to instrument: the metadata says so explicitly,
- * and its step list is EMPTY — a refusal is not a guess, so nothing is planned.
+ * A settled call the host REFUSED to instrument: the metadata carries the flag, and its step
+ * list is EMPTY — a refusal is not a guess, so the host reports nothing to draw.
  *
- * This is the record that would lose its notice if the card read a step count:
- * `total` is 0, so `total > 1` is false and the notice would vanish silently.
+ * It also carries a command and a preamble, because that is what a refused record actually
+ * holds: no marker was ever written, so every line the command printed arrives as the
+ * preamble. The card renders those two as its body, which is a browser claim — see the
+ * refusal test below.
  */
 function refusedBlock(): Record<string, unknown> {
   return {
     ...settledBlock(),
-    meta: { v: 1, instrumented: false, refused: true, partial: false, preamble: '', steps: [] },
+    call: {
+      name: 'shell_progress',
+      argsRaw: JSON.stringify({ command: 'Write-Output "a: b"', description: 'refused demo' }),
+    },
+    meta: {
+      v: 1,
+      instrumented: false,
+      refused: true,
+      partial: false,
+      preamble: 'the whole output\nstill the whole output',
+      steps: [],
+    },
   }
 }
 
@@ -638,28 +651,27 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(afterCounter, 'an element still follows the count inside the progress line').not.toContain('data-phase=')
   })
 
-  // The rendered proof for the refusal signal. The notice has to hang on the flag,
-  // because a REFUSED card has zero steps — `total > 1` is false for it — and it
-  // must still be invisible for a command that merely had one step.
+  // The rendered proof for the refusal signal: a refused call gets NO progress line, no
+  // counter and no step row — it is not a quiet command, it is one that was never tracked.
+  // The body it draws instead (the command and the whole output) is a browser claim: the
+  // card is COLLAPSED in a static render, and its body only exists once opened.
 
-  it('shows the "ran unmodified" notice for a REFUSED call with no steps at all', async () => {
+  it('draws no bar, no counter and no step row for a REFUSED call', async () => {
     const html = await renderCard(refusedBlock())
-    // Not one segment and not one step row: the refusal planned none. The notice is
-    // still there, because the card draws it at its OWN level — below the progress
-    // line — rather than inside a per-step row that an empty list never renders.
     expect((html.match(/data-phase=/g) ?? [])).toHaveLength(0)
-    expect(html).toContain('row.notInstrumented')
-    // Where it draws matters: the notice is the CARD's own paragraph, a sibling of
-    // the header and the progress line — not a piece of a per-step row, which a
-    // zero-step list never renders.
-    expect(/<p class="[^"]+">row\.notInstrumented<\/p>/.test(html)).toBe(true)
+    expect(html).not.toContain('data-counter')
+    expect(html).not.toContain('data-progress-line')
+    // And no notice either: the card says nothing about tracking any more. The reason a
+    // command was refused goes to the host log, where its reader can act on it.
+    expect(html).not.toContain('row.partial')
   })
 
-  it('keeps that notice off a single-step command that was merely uninstrumented', async () => {
+  it('keeps the progress line for a single-step command that was merely uninstrumented', async () => {
     const html = await renderCard(singleStepBlock())
-    expect(html).not.toContain('row.notInstrumented')
-    // It is still a card with its own counter; it just has nothing to warn about.
+    // It is still a card with its own counter, because it WAS tracked: one step, one
+    // segment. A refusal and this must not look alike.
     expect(html).toContain('row.counter')
+    expect(html).toContain('data-progress-line')
     // AND it draws its bar. One step is ONE segment, not none: a single-line command
     // used to get a counter and no bar at all, which is the shape this pins.
     expect((html.match(/data-phase="/g) ?? []), 'the single-step card drew no segment').toHaveLength(1)

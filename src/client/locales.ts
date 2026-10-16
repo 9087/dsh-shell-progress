@@ -16,7 +16,6 @@ export const en = {
   'row.title': 'Run a command with {tool}',
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds}s',
-  'row.notInstrumented': 'This command ran unmodified — no per-step tracking.',
   'row.partial': 'Some output could not be shown in full.',
   /*
    * Says what the CUT cost, at the cut: the per-step output budget discards whole
@@ -44,7 +43,6 @@ export const zh: Record<keyof typeof en, string> = {
   'row.title': '使用 {tool} 运行命令',
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds} 秒',
-  'row.notInstrumented': '该命令按原样执行 —— 未逐步骤跟踪。',
   'row.partial': '部分输出未能完整显示。',
   'row.truncated': '… 还有 {chars} 个字符未显示',
   'row.expand': '展开步骤',

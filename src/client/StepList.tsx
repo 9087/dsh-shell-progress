@@ -186,3 +186,41 @@ export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: 
     </div>
   )
 }
+
+/**
+ * The body of a REFUSED call: the whole command, then everything it printed.
+ *
+ * A refusal means the command ran WITHOUT instrumentation — no marker was written, so there
+ * is no step to point at, and the host reports no steps at all (a refusal is not a guess).
+ * Every line of output therefore arrives as the preamble, and what is left is the shape
+ * every shell row has: one command line and its output. This reuses the step row's own
+ * classes — including an EMPTY marker column, which is what keeps the command on the same
+ * column as every other command in the card and keeps the output's indent measured from the
+ * same place — so a refused card reads as the same card with less in it, not a second design.
+ * @param props.command - the command as it was written.
+ * @param props.output - everything the command printed; empty before anything arrives.
+ * @param props.toolName - names the highlighting grammar, exactly as in the step rows.
+ * @param props.outputLabel - the accessible name of the output block.
+ * @returns the command and its output.
+ */
+export function PlainBody({ command, output, toolName, outputLabel }: {
+  readonly command: string
+  readonly output: string
+  readonly toolName: string
+  readonly outputLabel: string
+}): ReactNode {
+  return (
+    <div className={styles.list} data-plain-body="true">
+      <div className={styles.row}>
+        <div className={styles.headline} data-headline="true">
+          {/* Empty on purpose: the column, not a dot. See the note above. */}
+          <span className={styles.marker} data-marker="true" aria-hidden="true" />
+          <div className={styles.code} data-code="true">{commandContent(command, toolName)}</div>
+        </div>
+        {output.trim() === '' ? null : (
+          <pre className={styles.output} data-output="true" aria-label={outputLabel}>{output}</pre>
+        )}
+      </div>
+    </div>
+  )
+}

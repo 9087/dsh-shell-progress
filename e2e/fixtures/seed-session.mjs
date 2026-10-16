@@ -121,6 +121,21 @@ const TRUNCATED_COMMAND = [
   "Write-Output 'done'",
 ].join('\n')
 
+/**
+ * A command the host REFUSES to instrument: PowerShell's own planner reports a syntax error,
+ * so nothing is marked and the command runs exactly as written. Every line it prints — here,
+ * PowerShell's own parse error — therefore arrives as the preamble, and the card draws the
+ * command and that output with no bar and no step rows.
+ *
+ * THE SECOND LINE IS THE SUBJECT: `"$v: x"` is a variable reference PowerShell cannot parse,
+ * which is exactly what makes the planner refuse.
+ */
+const REFUSED_CALL = 'call-live-refused-1'
+const REFUSED_COMMAND = [
+  'Write-Output "alpha"',
+  '"$v: beta"',
+].join('\n')
+
 /** Every live run this fixture keeps in flight, and the call id each one answers. */
 const LIVE_RUNS = [
   { callId: LIVE_CALL, command: LIVE_COMMAND, description: 'four-step build demo' },
@@ -131,6 +146,8 @@ const LIVE_RUNS = [
   { callId: LIVE_CALL_ZH, command: LIVE_COMMAND, description: '四步构建演示' },
   // And the one whose output the budget truncates, for the count the card has to state.
   { callId: TRUNCATED_CALL, command: TRUNCATED_COMMAND, description: '输出很长的步骤' },
+  // And the refused one, whose card must degrade to the plain shape.
+  { callId: REFUSED_CALL, command: REFUSED_COMMAND, description: 'refused command' },
 ]
 
 /** One process-wide flag: `apply` can run again on a reload, the runs must not. */
@@ -304,6 +321,16 @@ export function apply(ctx) {
     callId: TRUNCATED_CALL,
     name: 'shell_progress_pwsh',
     arguments: JSON.stringify({ command: TRUNCATED_COMMAND, description: '输出很长的步骤' }),
+  })
+
+  // ...and one the host REFUSED to instrument, whose card draws the command and its output
+  // instead of a bar and a step list.
+  session.append('tool/call', {
+    turn: 2,
+    step: 1,
+    callId: REFUSED_CALL,
+    name: 'shell_progress_pwsh',
+    arguments: JSON.stringify({ command: REFUSED_COMMAND, description: 'refused command' }),
   })
 
   // Started after the transcript is published. The spec waits for the shape it wants

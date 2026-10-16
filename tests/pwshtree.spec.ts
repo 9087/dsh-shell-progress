@@ -414,14 +414,16 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
   })
 
   it('runs a syntax-broken command unmodified, and its record carries the refusal', async () => {
-    // The plan DID answer here — its verdict is "PowerShell reported syntax
-    // errors" — so the SplitResult is used as-is and its heuristic steps stay only
-    // to give the degraded card something to draw. Nothing is instrumented.
+    // The plan DID answer here — its verdict is "PowerShell reported syntax errors" — and it
+    // hands back a best-effort step list. That list is NOT reported: a refused command ran
+    // without markers, so those rows could only ever read "pending", with no timing and no
+    // output of their own, and the card draws the command and its output instead. The
+    // refusal flag is the record; the steps were the guess it declined to trust.
     const { result, handed } = await throughTool(BROKEN_BUT_BALANCED)
     const plain = await shell(BROKEN_BUT_BALANCED)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
-    expect(result.progress.steps.length).toBeGreaterThan(1)
+    expect(result.progress.steps).toEqual([])
     expect(handed).toBe(BROKEN_BUT_BALANCED)
     expect(result.stdout.text).toBe(plain.stdout)
     expect(result.exitCode).toBe(plain.code)
