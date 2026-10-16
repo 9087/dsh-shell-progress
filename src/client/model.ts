@@ -109,6 +109,12 @@ export interface StepRow {
    * mistaken for a step that printed little.
    */
   readonly droppedChars: number
+  /**
+   * The model's one line about what this command does, or absent when there is none
+   * (see the host's `src/llm-notes.ts`). ABSENT IS THE CONTRACT: the card draws a
+   * comment line for a note and nothing at all without one.
+   */
+  readonly note?: string
   /** What the step is doing now. */
   readonly phase: StepPhase
   /** Milliseconds it took, or has been running for. */
@@ -149,6 +155,8 @@ interface Row {
   readonly text: string
   readonly output: string
   readonly droppedChars: number
+  /** Carried through unchanged: how to SHOW a note is the render's business, not this layer's. */
+  readonly note?: string
   readonly startedAt: number | null
   readonly endedAt: number | null
 }
@@ -195,6 +203,7 @@ function assembleRows(
       text: row.text,
       output: row.output,
       droppedChars: row.droppedChars,
+      ...row.note === undefined ? {} : { note: row.note },
       phase,
       durationMs,
       tone: durationTone(durationMs),
@@ -236,6 +245,7 @@ export function viewFromSettled(
     text: step.text,
     output: step.output,
     droppedChars: step.droppedChars ?? 0,
+    ...step.note === undefined ? {} : { note: step.note },
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
@@ -288,6 +298,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
     text: step.text,
     output: step.output,
     droppedChars: step.droppedChars ?? 0,
+    ...step.note === undefined ? {} : { note: step.note },
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
@@ -407,6 +418,9 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
       ...typeof step.droppedChars === 'number' && Number.isFinite(step.droppedChars) && step.droppedChars > 0
         ? { droppedChars: step.droppedChars }
         : {},
+      // Narrowed the same way, and for the same reason: a reloaded session must keep the
+      // notes it was written with, and a value that is not a non-empty string is not one.
+      ...typeof step.note === 'string' && step.note.length > 0 ? { note: step.note } : {},
       startedAt: typeof step.startedAt === 'number' ? step.startedAt : null,
       endedAt: typeof step.endedAt === 'number' ? step.endedAt : null,
     })

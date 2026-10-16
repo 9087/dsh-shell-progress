@@ -120,6 +120,15 @@ export function stepCard(
   const output = cardOutput(row.output)
   return (
     <div className={styles.card} data-step-card="true">
+      {/*
+       * The model's one line about what this command does — ABOVE the command, and written
+       * as a comment, because it is an annotation ABOUT the line rather than part of it
+       * (`#` is the comment marker of both dialects this tool runs). Absent means the card
+       * draws NOTHING here: no note, no blank line (see the host's `src/llm-notes.ts`).
+       */}
+      {row.note === undefined ? null : (
+        <p className={styles.cardNote} data-card-note="true">{`# ${row.note}`}</p>
+      )}
       <div className={styles.cardCommand} data-card-command="true">
         {commandContent(row.text, toolName)}
         {duration === null ? null : <span className={styles.cardTime} data-card-time="true">[{duration}]</span>}

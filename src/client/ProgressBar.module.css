@@ -221,13 +221,14 @@
   line-height: 16px;
 }
 
-/* Both the command and the output are `<pre>`-like blocks, so the code font has to be
- * declared ON them: `<pre>` carries a user-agent `font-family: monospace`, and an
- * element's own rule beats an inherited value. Relying on inheritance is what once made
- * the step list's command render in the browser's default monospace while its clock got
- * the shell's coding font. */
+/* The command, the output and the note share the code face, so a reader comparing them sees
+ * one material. For the two `<pre>`-like blocks the font has to be declared ON them: `<pre>`
+ * carries a user-agent `font-family: monospace`, and an element's own rule beats an inherited
+ * value. Relying on inheritance is what once made the step list's command render in the
+ * browser's default monospace while its clock got the shell's coding font. */
 .cardCommand,
-.cardOutput {
+.cardOutput,
+.cardNote {
   font: var(--dsw-font-markdown-code-block-small);
   font-size: 11px;
   line-height: 16px;
@@ -235,6 +236,18 @@
    * there; `break-all` is that, where `anywhere` would prefer a space. */
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+/* The model's one line about this command, written as a comment ABOVE it.
+ *
+ * Dimmer than the command, because it is an annotation ABOUT the line rather than the thing
+ * being run — the same relationship the output below has, on the other side of the command.
+ * `margin: 0` is not tidiness: this card, like the step list, is on ONE rhythm, and a note
+ * carrying its own leading would push the command down by exactly the kind of gap the list
+ * was just cleaned of. Its font and size come from the selector list above. */
+.cardNote {
+  margin: 0;
+  color: var(--dsw-alias-label-caption, inherit);
 }
 
 .cardCommand {
