@@ -30,6 +30,7 @@
     "src/dialect.ts",
     "src/index.ts",
     "src/instrument.ts",
+    "src/llm-notes.ts",
     "src/parse.ts",
     "src/plan.ts",
     "src/pwsh-path.ts",

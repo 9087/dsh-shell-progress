@@ -59,6 +59,8 @@ import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
 import { StepTracker } from './tracker.ts'
+import { requestStepNotes } from './llm-notes.ts'
+import type { LlmLike } from './llm-notes.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'shell-progress'
@@ -69,6 +71,46 @@ export const name = 'shell-progress'
  * which one is running.
  */
 export const inject: string[] = ['tools', 'shell', 'shellEnv', 'connection', 'webServer']
+
+/**
+ * The step-note preference, as the CLIENT last pushed it.
+ *
+ * Held in memory on purpose. It is a rendering preference of the GUI that shows the card,
+ * not state of any run: the client knows the reader's language — it is the thing rendering
+ * the notes — and it is the client that owns the switch, so it sends both on connect and
+ * whenever the switch flips. No locale means NO request at all, because a note written in
+ * the wrong language is worse than no note.
+ */
+const notesConfig: { enabled: boolean; locale: string | undefined } = { enabled: true, locale: undefined }
+
+/**
+ * Set the note preference pushed by the client.
+ * @param options - the fields to change; absent fields keep their current value.
+ */
+export function setStepNotesOptions(options: { readonly enabled?: boolean; readonly locale?: string | undefined }): void {
+  if (options.enabled !== undefined) notesConfig.enabled = options.enabled
+  if ('locale' in options) {
+    notesConfig.locale = typeof options.locale === 'string' && options.locale.length > 0 ? options.locale : undefined
+  }
+}
+
+/**
+ * The provider route this call's own session uses, taken from the agent the executor hands
+ * every tool run.
+ *
+ * Widened structurally, exactly as `exec.agent.session` is read above: this module must not
+ * depend on the agent package for one property. Absent or malformed route means no request.
+ * @param exec - the tool run context.
+ * @returns the route, or undefined when the host did not provide one.
+ */
+function notesRoute(exec: { readonly agent?: unknown }): { readonly provider: string; readonly model: string } | undefined {
+  const options = (exec.agent as { readonly options?: { readonly provider?: unknown; readonly model?: unknown } } | undefined)?.options
+  const provider = options?.provider
+  const model = options?.model
+  if (typeof provider !== 'string' || provider.length === 0) return undefined
+  if (typeof model !== 'string' || model.length === 0) return undefined
+  return { provider, model }
+}
 
 /** Configuration for the step-progress tool. */
 export interface Config {
@@ -525,6 +567,32 @@ export function apply(ctx: Context, config: Config = {}): void {
         // one-step bar) and nothing to colour if it had: the step could only read
         // "pending" and the counter `0/1` even after the command finished.
         if (!instrumented && steps.length === 1) entry.tracker.beginSoleStep()
+
+        // ONE LINE PER STEP, WRITTEN BY THE MODEL, in the reader's own language.
+        //
+        // Deliberately NOT awaited before the run starts: a command must never wait for its
+        // own description. The request goes out beside the command, and the answer is
+        // attached to the tracker when it lands, so the client's next snapshot poll carries
+        // it. Cancellation rides on `exec.signal`, so a run that ends takes its request with
+        // it — and every failure is silent by construction (`requestStepNotes` answers
+        // undefined), which is what keeps a convenience out of the card's correctness.
+        if (notesConfig.enabled && steps.length > 0) {
+          const route = notesRoute(exec)
+          const locale = notesConfig.locale
+          if (route !== undefined && locale !== undefined) {
+            const notes = requestStepNotes({
+              llm: ctx.get('llm') as LlmLike | undefined,
+              provider: route.provider,
+              model: route.model,
+              locale,
+              lines: steps.map((step) => step.text),
+              signal: exec.signal,
+            })
+            void notes.then((answer) => {
+              if (answer !== undefined) entry.tracker.setNotes(answer)
+            })
+          }
+        }
 
         let execution
         try {
