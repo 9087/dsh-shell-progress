@@ -4,13 +4,13 @@
 
 <!-- 徽章。`ci.yml` 与 `harness-matrix.yml` 都跑在 `main` 上，所以它们的徽章跟着 main 走。
      `release.yml` 是 TAG 触发的，在分支上没有状态（分支徽章会显示 "no status"），
-     所以它钉在 tag 上：每次发版都要把下面的 `?branch=v0.2.0` 一起改。 -->
+     所以它钉在 tag 上：每次发版都要把下面的 `?branch=v0.3.0` 一起改。 -->
 [![npm](https://img.shields.io/npm/v/dsh-shell-progress)](https://www.npmjs.com/package/dsh-shell-progress)
 [![许可证](https://img.shields.io/npm/l/dsh-shell-progress)](https://github.com/9087/dsh-shell-progress/blob/main/LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-339933)](https://github.com/9087/dsh-shell-progress/blob/main/package.json)
 [![CI](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml)
 [![Harness matrix](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml)
-[![Release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.2.0)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
+[![Release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.3.0)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
 
 一个 DeepSeek Harness 插件：在**工具调用卡片里**用一条分段进度条显示**一条多步 shell 命令现在跑到哪了**。
 
