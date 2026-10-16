@@ -217,7 +217,7 @@ function moduleLoaderSandbox() {
  * published tarball, and the assertion is the feature the package exists for — one
  * segment per step, from the host's own step metadata.
  * @param {string} bundlePath - the extracted `lib/client.js`.
- * @returns {{ contributions: string[], segments: number }} what it registered and drew.
+ * @returns {{ contributions: string[], sections: number, injected: string[], segments: number }} what it registered and drew.
  */
 function runPublishedClientBundle(bundlePath) {
   const requireFromRepo = createRequire(join(REPO, 'package.json'))
@@ -242,7 +242,7 @@ function runPublishedClientBundle(bundlePath) {
       inject: (name, callback) => { injected.push(name); return callback() },
       register: (options, component) => { registrations.push({ options, component }); return () => {} },
     },
-    locale: { register: () => () => {}, bind: () => (key) => key },
+    locale: { register: () => () => {}, bind: () => (key) => key, getLocale: () => ({ active: 'en' }) },
     connection: { rpc: { call: async () => ({ ok: false, error: { code: 'internal', message: 'stub' } }) } },
     effect: (fn) => fn(),
     on: () => () => {},
@@ -300,7 +300,14 @@ function runPublishedClientBundle(bundlePath) {
     console.error = originalError
   }
   const segments = (html.match(/data-phase="/gu) ?? []).length
-  return { contributions: registrations.map((entry) => String(entry.options?.key)), injected, segments }
+  // The TOOLVIEW keys, which is what "one view per wire name" means — the client ALSO seats a
+  // `settings.section`, and counting every registration here made that a false alarm the
+  // first time it shipped: the published bundle was fine, this check was out of date.
+  const contributions = registrations
+    .filter((entry) => entry.options?.name === 'tool.call.toolview')
+    .map((entry) => String(entry.options?.key))
+  const sections = registrations.filter((entry) => entry.options?.name === 'settings.section')
+  return { contributions, sections: sections.length, injected, segments }
 }
 
 async function main() {
@@ -421,6 +428,7 @@ async function main() {
       try {
         const ran = runPublishedClientBundle(join(packageDir, 'lib/client.js'))
         check('the published client bundle applies to a client context', ran.contributions.length === 2, ran.contributions.join(', '))
+        check('the published client bundle seats its Settings section', ran.sections === 1, `${String(ran.sections)} seats`)
         check('the published client bundle draws one segment per step', ran.segments === 4, `${String(ran.segments)} segments`)
       } catch (error) {
         check('the published client bundle runs', false, error instanceof Error ? error.message : String(error))
