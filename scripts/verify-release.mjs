@@ -289,7 +289,13 @@ async function main() {
   const name = flags.get('package') ?? MANIFEST.name
   const version = (positional[0] ?? 'latest').replace(/^v/u, '')
   const expectedGitHead = flags.get('expect-git-head')
-  const timeoutMs = Number(flags.get('timeout-ms') ?? '120000')
+  // Ten minutes by default, not two. The 120 s this started with is a footgun that
+  // fired on the very first release it gated (v0.3.0): the step ran for 124.0 s against
+  // its own 120 s deadline, so the gate reported a FAILURE that was purely its own
+  // impatience — the version appeared on the registry shortly after — and the GitHub
+  // Release was skipped on that false negative. Waiting longer costs a slow release at
+  // worst; giving up early costs a red run, a manual re-run, and trust in the gate.
+  const timeoutMs = Number(flags.get('timeout-ms') ?? '600000')
 
   console.log(`verify-release: ${name}@${version}${expectedGitHead === undefined ? '' : ` (expected commit ${expectedGitHead.slice(0, 8)})`}`)
 

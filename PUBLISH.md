@@ -113,9 +113,11 @@ GitHub Release is created, `release.yml` runs the same check by hand would:
 node scripts/verify-release.mjs "$VERSION" --expect-git-head "$(git rev-parse HEAD)"
 ```
 
-It polls until the registry actually serves the version (a fresh publish is absent for a
-while — and `npm view` can answer from its own cache, which is how a published version once
-looked like a 404), then checks that the record was built from that commit and carries a
+It polls for up to ten minutes until the registry actually serves the version (a fresh
+publish is absent for a while — on v0.3.0 the version document took over two minutes to
+appear, and a two-minute budget made the gate fail on nothing but its own impatience — and
+`npm view` can answer from its own cache, which is how a published version once looked like
+a 404), then checks that the record was built from that commit and carries a
 provenance attestation, downloads the tarball and verifies it against the registry's own
 `dist.integrity`, confirms the files `package.json` promises are inside it (including the
 vendored grammar, which no test in this repository installs), and finally loads the
