@@ -211,6 +211,12 @@
   margin-left: 0.6em;
   color: var(--dsw-alias-label-caption, inherit);
   font-variant-numeric: tabular-nums;
+  /* NOT selectable. This clock is the card's own annotation, not part of the command: a
+   * reader copies a command line out of here, and dragging a selection across it used to
+   * pick the number up as well, so the paste ended in something that was never typed. Its
+   * own box is untouched — the `margin-left` above still reserves the gap — so the row's
+   * layout, and the command's own selectable text, are exactly what they were. */
+  user-select: none;
 }
 
 /* The step's output: it starts on the command text's OWN column — no indent of its
