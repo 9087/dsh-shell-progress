@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2](https://github.com/9087/dsh-shell-progress/compare/v0.4.1...v0.4.2) (2026-10-16)
+
+### Bug Fixes
+
+* **notes:** pair the answer to steps by line number, and stop it restating the code ([d47828d](https://github.com/9087/dsh-shell-progress/commit/d47828da455eec6376fed4fd8c13becb81992c9d))
+
 ## [0.4.1](https://github.com/9087/dsh-shell-progress/compare/v0.4.0...v0.4.1) (2026-10-16)
 
 ### Bug Fixes
