@@ -1341,6 +1341,11 @@ test.describe('the shell_progress card in a real shell', () => {
     const dropped = Number(/(\d+)/u.exec(truncation.note ?? '')?.[1] ?? '0')
     expect(dropped, `the truncation note carries no character count: ${String(truncation.note)}`).toBeGreaterThan(1_000)
     expect(truncation.note, 'the note does not begin at the cut').toMatch(/^…/u)
+    // The shell's own vocabulary, in English in every locale: the shell localizes what a
+    // thing IS and writes what was DROPPED in English (`describeOmitted`), so this note
+    // uses its sentence and its unit name rather than a translation of our own.
+    expect(truncation.note, 'the note does not use the shell\'s omission wording').toContain('Omitted')
+    expect(truncation.note, 'the note does not name the unit the shell names').toContain('chars')
     // Only the one step claims it, and what was KEPT fits the budget.
     expect(truncation.notes, 'more than one step claims to be truncated').toBe(1)
     expect(truncation.kept, 'the kept output is not inside the 8192-character budget').toBeLessThan(8_200)

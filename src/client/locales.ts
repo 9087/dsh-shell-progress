@@ -22,8 +22,18 @@ export const en = {
    * lines, and without this a truncated step is indistinguishable from a quiet one.
    * `chars` counts everything the budget dropped for that step, newlines included —
    * the same units the budget charges, so kept + dropped is the step's real output.
+   *
+   * ENGLISH IN EVERY LOCALE, and not to be translated: the shell already has a wording for
+   * "these bytes did not fit", and it is English whatever the interface language is —
+   * `dsh-client-ui-tool`'s `describeOmitted` returns `Omitted ${count} ${unit}.` /
+   * `More ${unit} were omitted.` over the units `items | bytes | chars | lines`, while only
+   * the row's LABEL is localized (`detail.output.truncated`). A cut in a stream is an
+   * annotation about the data, not interface copy, so this note borrows the shell's own
+   * sentence and unit name, and reads beside its `[output truncated]` and
+   * `[lines: 1-40 of 900]` markers instead of beside a translation of our own. The leading
+   * `…` is the "the cut is here" glyph, which has no language.
    */
-  'row.truncated': '… {chars} more characters not shown',
+  'row.truncated': '… Omitted {chars} chars.',
   'row.expand': 'Show steps',
   'row.collapse': 'Hide steps',
   'row.stepLabel': 'Step {index} of {total}, line {line}',
@@ -44,7 +54,9 @@ export const zh: Record<keyof typeof en, string> = {
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds} 秒',
   'row.partial': '部分输出未能完整显示。',
-  'row.truncated': '… 还有 {chars} 个字符未显示',
+  // 英文原样，故意不翻译：见英文键旁的说明。shell 自己的省略措辞就是英文的
+  //（`describeOmitted`：`Omitted N chars.`），它本地化的只是行的标签。
+  'row.truncated': '… Omitted {chars} chars.',
   'row.expand': '展开步骤',
   'row.collapse': '收起步骤',
   'row.stepLabel': '第 {index} 步，共 {total} 步，第 {line} 行',
