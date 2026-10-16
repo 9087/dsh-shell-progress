@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/9087/dsh-shell-progress/compare/v0.2.0...v0.3.0) (2026-10-16)
+
+### Features
+
+* **client:** state how much of a truncated step's output is missing ([563f328](https://github.com/9087/dsh-shell-progress/commit/563f328e45965806e2cb6c46983a212162b64e53))
+* **release:** verify the published artifact, not just the source ([23d196b](https://github.com/9087/dsh-shell-progress/commit/23d196b3695f2feebde1b5125b75d414fa8f7c72))
+
+### Bug Fixes
+
+* **client:** give a single-step command its one segment, and stop fading unrun lines ([52f5f75](https://github.com/9087/dsh-shell-progress/commit/52f5f75cb9b3568027cfa99f170b6f48fad7a03f))
+
 ## [0.2.0](https://github.com/9087/dsh-shell-progress/compare/v0.1.1...v0.2.0) (2026-10-15)
 
 ### Features
