@@ -487,12 +487,15 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(dividerUses, 'the divider token is used by something other than the card\'s rule').toHaveLength(1)
     expect(outputBody, 'the output is not dimmer than the command').toContain('color:var(--dsw-alias-label-caption')
     expect(outputBody, 'the output still wears the command line\'s own colour').not.toContain('color:var(--dsw-alias-label-primary')
-    // The `:empty` rule that existed for the divider is gone with it, and the spacing
-    // that keeps an empty output out of the way now hangs on the block that HAS
-    // something to show: dropping the rule must not re-open a blank gap under a step
-    // that printed nothing.
+    // The `:empty` rule that existed for the divider is gone with it, and no rule puts room
+    // back: the output carries `margin: 0` and no vertical padding, so an output that printed
+    // nothing takes no room AND every line in the list — a command, its output, the next
+    // command — sits on the same 15px rhythm. It used to carry 3px of margin plus 2px of
+    // padding, five times the gap below it, which is what made an output look as if it
+    // floated between two steps rather than hanging under its own.
     expect(css, 'the dropped `:empty` rule is still in the stylesheet').not.toMatch(/:empty\{/u)
-    expect(css, 'an empty output would take up blank room again').toMatch(/_output[A-Za-z0-9_-]*:not\(:empty\)\{/u)
+    expect(outputBody, 'the output spaces itself away from its command again').toContain('margin:0')
+    expect(outputBody, 'the output adds space above itself again').not.toContain('padding-top')
     // The BAR is slimmer than its own box, and this is the CSS half of "smaller, with the
     // hot zone intact": the segment clips its paint to the content box and takes 1.5px of
     // top and bottom padding to make the difference, while its box — the pointer target —

@@ -239,19 +239,17 @@
   padding-left: var(--step-output-indent, 15px);
   color: var(--dsw-alias-label-caption, inherit);
   white-space: pre-wrap;
+  /* ONE RHYTHM FOR THE WHOLE LIST. Every line here — a command, the output under it, the
+   * next command — is one 15px line box, and nothing adds space above itself. The output
+   * used to carry `margin-top: 3px` and `padding-top: 2px`, which made the command gap to
+   * its own output five times the gap from that output to the next command: the output read
+   * as floating between two steps instead of hanging under the one it belongs to. What tells
+   * the two apart is the indent — the output starts on the command's own column, the next
+   * marker starts at the marker column — not a gap. An output that printed nothing still
+   * takes no room, because there is no margin and no padding here to give it any. */
+  margin: 0;
 }
 
-/* The space between the command line and the output, on the block that has
- * something to show. The JS guard in `StepList.tsx` is the real
- * mechanism — a `\n`-only output is a text node, so `:not(:empty)` never matches
- * it — and this rule is the second guard for a block that did reach the DOM with
- * no text: it takes up no room, which is about there being nothing to show rather
- * than about folding
- * anything away. */
-.output:not(:empty) {
-  margin: 3px 0 0;
-  padding-top: 2px;
-}
 
 /* The cut, stated AT the cut. Dimmer than the output it follows — it is a note ABOUT
  * that output, not output — and on the command text's own column, like the block above
