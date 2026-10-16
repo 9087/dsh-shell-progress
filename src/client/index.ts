@@ -43,6 +43,14 @@ interface SlotsService {
 /** The slice of the locale service this plugin uses. */
 interface LocaleService {
   register(namespace: string, dictionaries: Record<string, Record<string, string>>): () => void
+  /**
+   * Bind this plugin's namespace to a translator, the way the shell's own plugins do.
+   *
+   * This is the ONE way to render copy in the right language: it resolves a key through the
+   * ACTIVE language at the moment it is called, the host's stored preference included — which
+   * is what makes a Chinese interface read Chinese.
+   */
+  bind?(namespace: string): (key: string) => string
   /** The shell's current locale; its snapshot names the language the reader is reading. */
   getLocale?(): unknown
 }
@@ -56,11 +64,12 @@ interface LocaleSnapshotLike {
  * The one locale event this plugin listens for.
  *
  * Declared locally for the same reason the services above are: subscribing to it must not
- * make this plugin depend on the package that declares it. The handler takes no arguments —
- * the push re-reads the snapshot, so nothing about the payload has to be right.
+ * make this plugin depend on the package that declares it. The handler may be given the new
+ * snapshot, and the push prefers the id it carries — that is the shell saying "the language
+ * is now X", which is more trustworthy than re-reading the current one.
  */
 interface LocaleEvents {
-  on(event: 'locale/change', handler: () => void): () => void
+  on(event: 'locale/change', handler: (snapshot?: unknown) => void): () => void
 }
 
 /** Register the tool-call view. */
@@ -84,8 +93,10 @@ export function apply(ctx: Context): void {
    * whatever it was is right, but going quiet about WHY the notes never appear is not, and
    * that is the failure a reader would otherwise have to guess at.
    */
-  const pushNotePreference = (): void => {
-    const snapshot = locale.getLocale?.() as LocaleSnapshotLike | undefined
+  const pushNotePreference = (changed?: unknown): void => {
+    // The id comes from the CHANGED snapshot when the shell hands one over — that is the
+    // shell saying which language is now active — and from the current snapshot otherwise.
+    const snapshot = (changed ?? locale.getLocale?.()) as LocaleSnapshotLike | undefined
     const id = typeof snapshot?.id === 'string' && snapshot.id.length > 0 ? snapshot.id : undefined
     if (id === undefined) {
       console.warn('shell-progress: the locale service named no language, so step notes stay off')
@@ -95,17 +106,24 @@ export function apply(ctx: Context): void {
   }
 
   /**
-   * The settings tab's own label, in the language the client is rendering.
+   * This plugin's translator, built the way the shell's own plugins build one.
    *
-   * The shell asks for a STRING here, so it cannot resolve our dictionary key itself; this
-   * plugin ships exactly two languages (`en`, `zh`), and picking between two shipped
-   * dictionaries is cheaper and far more honest than guessing at a translator the shell
-   * might hand us in a different shape.
+   * `bind` resolves a key through the ACTIVE language at the moment it is called, so the
+   * Settings tab reads `命令进度` in a Chinese interface and `Shell Progress` in an English
+   * one, the host's stored preference included.
+   *
+   * This REPLACED a version that read `getLocale().id` and picked between the two shipped
+   * dictionaries by hand, with a silent English fallback for an id it could not read. That
+   * fallback was the bug: the tab stayed `Shell Progress` in a Chinese interface and nothing
+   * anywhere said so. The dictionary lookup below is the last resort for a host without
+   * `bind`, not the mechanism.
    */
-  const tabLabel = (): string => {
+  const t = (key: string): string => {
+    const bound = locale.bind?.call(locale, NS)
+    if (typeof bound === 'function') return bound(key)
     const snapshot = locale.getLocale?.() as LocaleSnapshotLike | undefined
     const id = typeof snapshot?.id === 'string' ? snapshot.id : ''
-    return id.startsWith('zh') ? zh['settings.tabLabel'] : en['settings.tabLabel']
+    return (id.startsWith('zh') ? zh : en)[key as keyof typeof en] ?? key
   }
   ctx.effect(() => {
     pushNotePreference()
@@ -113,7 +131,7 @@ export function apply(ctx: Context): void {
   }, 'ui-shell-progress: note preference')
   // A switch of language changes the language the notes must be written in.
   ctx.effect(
-    () => (ctx as unknown as LocaleEvents).on('locale/change', () => { pushNotePreference() }),
+    () => (ctx as unknown as LocaleEvents).on('locale/change', (snapshot) => { pushNotePreference(snapshot) }),
     'ui-shell-progress: locale change',
   )
 
@@ -157,7 +175,7 @@ export function apply(ctx: Context): void {
       name: 'settings.section',
       id: 'shell-progress',
       order: 100,
-      label: tabLabel,
+      label: () => t('settings.tabLabel'),
       locale: NS,
     }, SettingsSection))
   } catch (error) {
