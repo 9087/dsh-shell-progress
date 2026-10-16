@@ -84,6 +84,18 @@ export const inject: string[] = ['tools', 'shell', 'shellEnv', 'connection', 'we
 const notesConfig: { enabled: boolean; locale: string | undefined } = { enabled: true, locale: undefined }
 
 /**
+ * Reasons the notes cannot be written that have already been reported.
+ *
+ * SILENCE HAS A COST THIS FEATURE ALREADY PAID. With no llm service, no route or no locale,
+ * the note simply never appears — and nothing anywhere says which of the three it was, so
+ * the only thing a reader can do is guess. Each reason is therefore stated ONCE per process:
+ * visible enough to diagnose, quiet enough not to repeat on every command. `warn` and not
+ * `debug`, for the same reason the refusal notice is a `warn`: it has to show up without
+ * turning debug logging on.
+ */
+const notesDiagnosed = new Set<string>()
+
+/**
  * Set the note preference pushed by the client.
  * @param options - the fields to change; absent fields keep their current value.
  */
@@ -591,9 +603,21 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (notesConfig.enabled && steps.length > 0) {
           const route = notesRoute(exec)
           const locale = notesConfig.locale
-          if (route !== undefined && locale !== undefined) {
+          const llm = ctx.get('llm') as LlmLike | undefined
+          // One complaint per gate, and the FIRST one is the first thing to fix: the chain is
+          // walked in the order the request needs it. A host that cannot write notes says so
+          // rather than looking like a feature that does not work.
+          const complain = (reason: string): void => {
+            if (notesDiagnosed.has(reason)) return
+            notesDiagnosed.add(reason)
+            ctx.logger.warn(`shell-progress: no step notes — ${reason}`)
+          }
+          if (locale === undefined) complain('the client has not said which language to write them in')
+          else if (route === undefined) complain('the agent carries no provider/model route')
+          else if (llm === undefined) complain('this host has no llm service')
+          else {
             const notes = requestStepNotes({
-              llm: ctx.get('llm') as LlmLike | undefined,
+              llm,
               provider: route.provider,
               model: route.model,
               locale,
@@ -601,7 +625,11 @@ export function apply(ctx: Context, config: Config = {}): void {
               signal: exec.signal,
             })
             void notes.then((answer) => {
-              if (answer !== undefined) entry.tracker.setNotes(answer)
+              if (answer === undefined) {
+                complain('the model call produced no notes: a refusal, a timeout or an empty answer')
+                return
+              }
+              entry.tracker.setNotes(answer)
             })
           }
         }
