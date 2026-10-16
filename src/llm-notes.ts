@@ -76,9 +76,14 @@ export const MAX_NOTE_CHARS = 60
 const MAX_ANSWER_TOKENS = 512
 
 /**
- * The instruction. Written as a list of REQUIRED output properties because that is what
- * models follow most reliably: the count, the language, the length, and the absence of
- * decoration are each stated, and the only thing the answer may contain is the notes.
+ * The instruction.
+ *
+ * THE NUMBERING IS LOAD-BEARING, not decoration. The first version asked for the notes alone
+ * and matched them to steps BY ORDER; a model that opened with "Let me go through each line:"
+ * — and one did — had its own reasoning read as the first step's note, with every real note
+ * landing one step too late. Requiring each answer line to carry the command's own number
+ * means an answer that does not line up loses THAT note instead of shifting the rest: a
+ * missing note costs a convenience, a misattributed one lies about what a command does.
  * @param count - how many notes are wanted.
  * @param locale - the language the notes must be written in.
  * @returns the system prompt.
@@ -86,11 +91,14 @@ const MAX_ANSWER_TOKENS = 512
 function systemPrompt(count: number, locale: string): string {
   return [
     'You annotate shell commands for a non-expert reader.',
-    `Write exactly ${String(count)} notes, one per command line, in the same order.`,
+    'The user sends numbered command lines. Answer with ONE line per command line, and start',
+    'every answer line with that command line\'s OWN number followed by a colon, like "3: ...".',
     `Write each note in the language identified by the BCP-47 tag "${locale}".`,
-    `Each note is ONE line of at most ${String(MAX_NOTE_CHARS)} characters, plain language, no code,`,
-    'no trailing period, no numbering, no bullets, no markdown, no blank lines.',
-    'Say what the line does, not how it does it. Output the notes and nothing else.',
+    `Each note is at most ${String(MAX_NOTE_CHARS)} characters, plain language, no code, no markdown, no trailing period.`,
+    'Do NOT repeat or paraphrase the code: the reader can already see that line, so name what it',
+    'ACCOMPLISHES instead. Do not open with the command name, a file name, or a phrase like "this line".',
+    `Answer with the ${String(count)} numbered lines and NOTHING else: no preamble, no reasoning,`,
+    'no summary, no blank lines, no code fences. Say what the line does, not how it does it.',
   ].join(' ')
 }
 
@@ -112,23 +120,30 @@ function liveText(chunk: unknown): string {
 }
 
 /**
- * Turn the model's answer into notes: one per non-empty line, decoration removed.
+ * Turn the model's answer into notes: one per NUMBERED line, matched to the command it names.
  *
- * Numbering and bullets are stripped because models add them even when told not to, and a
- * leading "1. " in the card would be noise the reader did not ask for. Lines past the
- * expected count are dropped: the instruction said how many there are, and a model that
- * keeps going is inventing steps that do not exist.
+ * Anything that is not a numbered line is IGNORED — a preamble, a recap, a code fence, a
+ * stray bullet. An answer that skips a number leaves THAT step without a note and all the
+ * others exactly where they belong; that is the whole reason the answer is numbered, and the
+ * failure it prevents is not hypothetical: matching by position is how a model's own
+ * reasoning once became step 1's note and pushed every real note one step late.
  * @param answer - the model's full text.
  * @param count - how many notes were requested.
- * @returns the notes, possibly fewer than `count`.
+ * @returns one entry per command line, `undefined` for a line the model did not name.
  */
-export function parseNotes(answer: string, count: number): readonly string[] {
-  return answer
-    .split('\n')
-    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/u, '').trim())
-    .filter((line) => line.length > 0)
-    .slice(0, count)
-    .map((line) => (line.length > MAX_NOTE_CHARS ? `${line.slice(0, MAX_NOTE_CHARS - 1).trimEnd()}…` : line))
+export function parseNotes(answer: string, count: number): readonly (string | undefined)[] {
+  const notes: (string | undefined)[] = []
+  for (let index = 0; index < count; index += 1) notes.push(undefined)
+  for (const line of answer.split('\n')) {
+    // `1: …`, `1. …`, `1) …` — plus an optional comment marker the model may add anyway.
+    const match = /^\s*(\d{1,4})\s*[:.)\]]\s*(.*)$/u.exec(line)
+    if (match === null) continue
+    const index = Number(match[1]) - 1
+    const text = (match[2] ?? '').replace(/^\s*(?:#|\/\/)\s*/u, '').trim()
+    if (index < 0 || index >= count || text.length === 0 || notes[index] !== undefined) continue
+    notes[index] = text.length > MAX_NOTE_CHARS ? `${text.slice(0, MAX_NOTE_CHARS - 1).trimEnd()}…` : text
+  }
+  return notes
 }
 
 /**
@@ -139,7 +154,7 @@ export function parseNotes(answer: string, count: number): readonly string[] {
  * @param request - what to describe and which route to use.
  * @returns the notes in command-line order, or `undefined` when there are none to show.
  */
-export async function requestStepNotes(request: StepNotesRequest): Promise<readonly string[] | undefined> {
+export async function requestStepNotes(request: StepNotesRequest): Promise<readonly (string | undefined)[] | undefined> {
   const { llm, lines, timeoutMs = DEFAULT_TIMEOUT_MS } = request
   if (llm === undefined || lines.length === 0) return undefined
   // The caller's own cancellation (the run ended) and the deadline both have to be able to
@@ -159,7 +174,7 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
       signal: controller.signal,
     })
     let answer = ''
-    const consume = (async (): Promise<readonly string[]> => {
+    const consume = (async (): Promise<readonly (string | undefined)[]> => {
       for await (const chunk of stream) answer += liveText(chunk)
       return parseNotes(answer, lines.length)
     })()
@@ -172,7 +187,8 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
     })
     const notes = await Promise.race([consume, stopped])
     if (notes === undefined) return undefined
-    return notes.length === 0 ? undefined : notes
+    // Every step missing a note is the same answer as no notes at all: show nothing.
+    return notes.some((note) => note !== undefined) ? notes : undefined
   } catch {
     return undefined
   } finally {

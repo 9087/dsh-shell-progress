@@ -41,7 +41,7 @@ const base = {
 
 describe('requestStepNotes', () => {
   it('returns one note per command line, in order', async () => {
-    const { llm, calls } = fakeLlm([{ type: 'text', text: '安装依赖\n构建产物' }])
+    const { llm, calls } = fakeLlm([{ type: 'text', text: '1: 安装依赖\n2: 构建产物' }])
     const notes = await requestStepNotes({ ...base, llm })
     expect(notes).toEqual(['安装依赖', '构建产物'])
     expect(calls[0]?.provider).toBe('deepseek')
@@ -53,12 +53,14 @@ describe('requestStepNotes', () => {
     await requestStepNotes({ ...base, llm })
     const system = calls[0]?.system ?? ''
     expect(system, 'the locale is not stated to the model').toContain('zh-CN')
-    expect(system, 'the note count is not stated to the model').toContain('exactly 2 notes')
+    expect(system, 'the note count is not stated to the model').toContain('2 numbered lines')
     expect(system, 'the length limit is not stated to the model').toContain(String(MAX_NOTE_CHARS))
+    expect(system, 'the model is not told to stop restating the code it is annotating').toContain('Do NOT repeat or paraphrase the code')
+    expect(system, 'the model is not told to number its answer').toContain('OWN number')
   })
 
   it('hands the model the command lines themselves', async () => {
-    const { llm, calls } = fakeLlm([{ type: 'text', text: 'a\nb' }])
+    const { llm, calls } = fakeLlm([{ type: 'text', text: '1: a\n2: b' }])
     await requestStepNotes({ ...base, llm })
     const sent = JSON.stringify(calls[0]?.messages ?? [])
     expect(sent, 'the first command is not in the request').toContain('pnpm install')
@@ -66,21 +68,39 @@ describe('requestStepNotes', () => {
   })
 
   it('joins an answer that arrives in several chunks', async () => {
-    const { llm } = fakeLlm([{ text: '安装' }, { delta: { text: '依赖\n构建' } }, { text: '产物' }])
+    const { llm } = fakeLlm([{ text: '1: 安装' }, { delta: { text: '依赖\n2: 构建' } }, { text: '产物' }])
     expect(await requestStepNotes({ ...base, llm })).toEqual(['安装依赖', '构建产物'])
   })
 
-  it('drops numbering, bullets and blank lines the model added anyway', () => {
-    expect(parseNotes('1. 安装依赖\n\n- 构建产物\n3) 打包', 3)).toEqual(['安装依赖', '构建产物', '打包'])
+  it('takes the notes by their numbers and ignores every unnumbered line', () => {
+    // The real answer that started this: a preamble, a recap, numbered notes. Matching by
+    // POSITION read the preamble as step 1's note and pushed every note one step late.
+    const answer = [
+      'We need to write 2 notes in Chinese, one per command line.',
+      'Let me go through each line:',
+      '1: 安装依赖',
+      '- 这一行没有编号，必须被忽略',
+      '2: 构建产物',
+      'Hope this helps!',
+    ].join('\n')
+    expect(parseNotes(answer, 2)).toEqual(['安装依赖', '构建产物'])
   })
 
-  it('drops lines past the expected count rather than inventing steps', () => {
-    expect(parseNotes('a\nb\nc', 2)).toEqual(['a', 'b'])
+  it('leaves THAT step empty when the model skips its number, instead of shifting the rest', () => {
+    expect(parseNotes('1: 安装依赖\n3: 打包', 3)).toEqual(['安装依赖', undefined, '打包'])
+  })
+
+  it('strips a comment marker the model added anyway', () => {
+    expect(parseNotes('1: # 安装依赖', 1)).toEqual(['安装依赖'])
+  })
+
+  it('drops a number past the expected count rather than inventing steps', () => {
+    expect(parseNotes('1: a\n2: b\n3: c', 2)).toEqual(['a', 'b'])
   })
 
   it('truncates a note that ran long instead of letting it wrap', () => {
     const long = 'x'.repeat(MAX_NOTE_CHARS + 20)
-    const [note] = parseNotes(long, 1)
+    const [note] = parseNotes(`1: ${long}`, 1)
     expect(note?.length).toBe(MAX_NOTE_CHARS)
     expect(note?.endsWith('\u2026')).toBe(true)
   })
