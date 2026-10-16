@@ -127,9 +127,15 @@
   transform: scale(1.5);
 }
 
+/* A pending step's dot is DARKER than the bar's pending segment, on purpose: the dot is a
+ * marker the eye has to find in a list of command lines, and at the bar's translucency it
+ * sank into the row. The bar keeps the quiet skeleton grey — its whole track already says
+ * "nothing has run here" — so this one state is allowed to differ between the two views.
+ * How much darker is `--step-alpha-pending-dot`: it was opaque, which a reader found a step
+ * too heavy beside the command text, so the marker is now painted at 0.7. */
 .row[data-phase='pending'] .dot {
-  background-color: var(--step-state-pending, currentColor);
-  opacity: var(--step-alpha-pending, 0.5);
+  background-color: var(--step-state-pending-dot, var(--step-state-pending, currentColor));
+  opacity: var(--step-alpha-pending-dot, 0.3);
 }
 
 .row[data-phase='running'][data-tone='normal'] .dot {

@@ -22,9 +22,45 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* A CLIPPING box, so nothing this card lays out can ever add to an ancestor's scrollable
+   * overflow. The shell puts the card in a scroll container (`overflow-y: auto` with
+   * `scrollbar-gutter: stable`) and paints a scrollbar for a single pixel of it; a closed
+   * card has been measured reporting 4px of scrollable overflow with no descendant box, no
+   * bottom margin and no pseudo-element of ours to explain it. `clip` rather than `hidden`:
+   * this must not become a second scroll region (see `.steps`), and `hidden` on a box that
+   * is not scrollable still creates a scroll container.
+   *
+   * This edge is WHY the counter is a size smaller and lifted (see `.counter`): the clip cuts
+   * at the card's bottom, and ink below it is cut rather than merely overlapping. An
+   * `overflow-clip-margin` was tried and rejected — it widens the clip region, and the
+   * overflow starts propagating to the ancestor again (measured: the shell's body went from
+   * `scroll 63` back to `scroll 65` for `client 63`). */
+  overflow: clip;
   --step-state-pending: var(--dsw-alias-bg-skeleton);
-  --step-state-running: var(--dsw-alias-state-success-tertiary);
-  --step-state-done: var(--dsw-alias-state-success-primary);
+  /* A step that is on time is BLUE, not green: green reads as "healthy/succeeded" in this
+   * transcript, and the bar is not reporting success — it is reporting how long a command
+   * has been running.
+   *
+   * The shade is the system's own static blue, `deepseek-400`: `deepseek-300` was one step
+   * too washed out (its lightness left almost no colour in the segment), while the alias
+   * steps sit at `deepseek-400`/`500` and the 500 end is the deeper blue this card does not
+   * want. Static, so it is the same blue in both themes; a light blue reads correctly on the
+   * dark card, which is why no alias is needed here. */
+  --step-state-running: var(--dsw-static-deepseek-400);
+  --step-state-done: var(--dsw-static-deepseek-400);
+  /* The STEP LIST's own colour for a step that has not run yet. The bar keeps the quiet
+   * skeleton grey here; the round marker in the list is a dot the eye has to find, and at
+   * the bar's translucency it disappeared into the row. So this one state is allowed to
+   * differ between the two views: the palette rule ("a dot is its segment's colour") is
+   * about the colours a STATE chooses, not about forcing the faintest of them to stay
+   * identical where it stops being legible. */
+  --step-state-pending-dot: var(--dsw-alias-label-tertiary);
+  /* ...painted at 0.3 rather than opaque. Opaque, then 0.7, 0.55 and 0.45 were each still heavier
+   * than a marker whose whole job is to say "not yet" needs to be. This is the knob for how much
+   * of the marker shows through, the same shape as the two alphas below — and it sits BELOW the
+   * bar's own pending alpha on purpose, because the two alphas are not comparable numbers: this
+   * marker's base colour is the far stronger tertiary text grey, the bar's is the skeleton grey. */
+  --step-alpha-pending-dot: 0.3;
   --step-state-slow: var(--dsw-alias-state-warn-primary);
   --step-state-error: var(--dsw-alias-state-error-primary);
   /* How much of that palette's saturation is painted. A bar segment is a solid block of
@@ -43,9 +79,17 @@
    * been supported everywhere for years. */
   --step-saturation: 0.7;
   /* The same two translucencies the bar uses, so a dot and its segment read as
-   * the same material rather than as two colours that merely look close. */
-  --step-alpha-pending: 0.5;
-  --step-alpha-running: 0.7;
+   * the same material rather than as two colours that merely look close. Pending follows running
+   * down one notch behind it, so the pair keeps saying "running is the brighter of the two wet
+   * states" — that notch is the whole reason there are two names here instead of one. */
+  --step-alpha-pending: 0.35;
+  /* A running step is STILL unfinished, so it wears the same "not done yet" material as a
+   * pending one — a hair brighter, not half-way to opaque. It has been 0.7 then 0.6, and both
+   * read as nearly finished beside the bar's filled segments; 0.4 is the airiest value that
+   * still separates a running step from the card behind it at all. The COLOUR carries the rest
+   * of the distinction — deepseek-400 against the pending grey — which is why this may sit a
+   * hair above `--step-alpha-pending` without the two states becoming one. */
+  --step-alpha-running: 0.4;
   /* 4px: the gap between the card's own content box and the step rows' right
    * edge. The COUNTER is the element that lands on that edge, because it is the
    * outermost element of the progress line now that the count sits to the right of
@@ -82,6 +126,13 @@
  * shared `--card-pad-right`, the same one the step list uses, so the counter that
  * ENDS this row — the bar's count, now to the right of the bar — ends where the
  * step rows end. */
+/* The row's box is EXACTLY as tall as the bar it draws — 9px, the track's own height —
+ * and it must stay that way. The shell allots a collapsed card its own title row plus
+ * this row, and its body is a scroll container (`overflow-y: auto` with
+ * `scrollbar-gutter: stable`): ONE px of overflow here does not spill harmlessly, it
+ * paints a scrollbar beside the bar. A `padding-bottom` used to hold the gap to the
+ * step list and made this box 11px, which is what produced that scrollbar; the gap
+ * now lives on `.steps`, which only exists when the card is OPEN. */
 .progressLine {
   display: flex;
   align-items: center;
@@ -89,7 +140,6 @@
   min-width: 0;
   padding-left: calc(22px + var(--dsh-content-font-delta, 0px));
   padding-right: var(--card-pad-right);
-  padding-bottom: 2px;
 }
 
 /* The list does NOT scroll: the transcript outside it already does, and a second
@@ -98,6 +148,12 @@
  * even 1px wider than this box gave the container a horizontal scroll range, and the
  * browser used it: every command line shifted sideways the moment a row was hovered. */
 .steps {
+  /* The 2px the progress line used to carry as `padding-bottom`, moved here because this
+   * element is only in the tree while the card is open: the closed card's height is the
+   * shell's title row plus the 9px bar and nothing else, so the gap cannot push it past
+   * what the shell allots. `padding` rather than `margin` also keeps it out of the
+   * scrollable overflow a margin would create in that same shell container. */
+  padding-top: 2px;
   /* `21px + 1px` of the row's own padding keeps every command line at the same 22px
    * it has always been at, while the row still has 1px of fill around it. */
   padding-left: calc(21px + var(--dsh-content-font-delta, 0px));
@@ -122,7 +178,14 @@
   align-self: center;
   line-height: 9px;
   color: var(--dsw-alias-label-caption, inherit);
-  font-size: var(--dsh-content-font-size-secondary, 13px);
+  /* The card is a CLIPPING box and its bottom edge is this line's bottom edge, so text whose
+   * ink hangs below the 9px line box is CUT there — `3/3` was losing its lower half. The count
+   * is therefore one pixel smaller than the shell's secondary size (scaled off the token, so a
+   * host with a larger content font gets a larger count), which pulls the ink's lower edge back
+   * inside the row. It is NOT shifted: the counter and the bar share one vertical centre, and
+   * a `translateY` broke that by the pixel it moved (asserted in the e2e). The row is still
+   * exactly 9px tall, which is what keeps the closed card the height the shell has room for. */
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
   font-variant-numeric: tabular-nums;
 }
 

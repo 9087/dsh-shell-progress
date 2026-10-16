@@ -327,8 +327,11 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // pinned by the shape test below.)
     expect(css).toContain('height:9px')
     expect(css).toContain('min-width:48px')
-    // A loaded token, so the segments are not merely transparent.
-    expect(css).toContain('--dsw-alias-state-success-primary')
+    // A loaded token, so the segments are not merely transparent. It is the system's own
+    // static BLUE, `deepseek-400`: the bar reports how long a command has run, not whether
+    // it succeeded (green is the shell's colour for that), and the paler `deepseek-300`
+    // left the segment with almost no colour in it.
+    expect(css).toContain('--dsw-static-deepseek-400')
   })
 
   // The bar and the step list are two CSS modules, and the dot's colour has to BE
@@ -346,13 +349,19 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
         `--step-state-${state} is read by ${String(consumed)} rules — the bar segment and the dot must both read it`,
       ).toBeGreaterThanOrEqual(2)
     }
-    // The two translucencies are shared the same way, so pending and running read as
-    // the same material in the list as they do on the bar.
-    for (const state of ['pending', 'running']) {
+    // The RUNNING translucency is shared, so a running step reads as the same unfinished
+    // material in the list as on the bar. The PENDING one is the bar's alone now: the list's
+    // pending dot is deliberately darker and fully opaque, because at the bar's faintness it
+    // disappeared into the row (see `--step-state-pending-dot`). This test is the reason that
+    // decision had to be written down — it fails the moment the two views stop agreeing.
+    for (const state of ['running']) {
       const { declared, consumed } = paletteUse(css, `--step-alpha-${state}`)
       expect(declared, `--step-alpha-${state} is declared ${String(declared)} times, not once`).toBe(1)
       expect(consumed, `--step-alpha-${state} is read by ${String(consumed)} rules`).toBeGreaterThanOrEqual(2)
     }
+    const pendingAlpha = paletteUse(css, '--step-alpha-pending')
+    expect(pendingAlpha.declared, 'the pending translucency is not declared exactly once').toBe(1)
+    expect(pendingAlpha.consumed, 'the pending translucency is the dot\'s again').toBe(1)
     // And how VIVID that palette is painted is shared the same way: declared once, on the
     // card with the colours, and read by all three places that paint a step's state —
     // the segment, the dot and the single-fill bar — because a dot that stayed vivid
@@ -479,17 +488,20 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(segmentRule, 'the segment has no rule of its own').not.toBeNull()
     const segmentBody = segmentRule?.[1] ?? ''
     expect(segmentBody, 'the segment paints its padding, so the bar is as tall as its box').toContain('background-clip:content-box')
-    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:2.5px 0')
+    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:3px 0')
     expect(segmentBody, 'the padding would grow the box instead of insetting the paint').toContain('box-sizing:border-box')
     expect(segmentBody, 'the segment no longer fills the track').toContain('height:100%')
     const trackRule = /_track\{([^}]*)\}/u.exec(css)
     expect(trackRule?.[1], 'the track no longer keeps the 9px the row and the card anchor are measured from').toContain('height:9px')
-    // The lifted state shrank with it: 11px of box is 6px of colour where 13px used to be.
+    // The lifted state thickens INSIDE the track now: it takes 1px off the padding top and
+    // bottom instead of growing the box past the 9px track, which is what put 1px above and
+    // 1px below into the card's scrollable overflow (and a scrollbar in the shell's body).
+    // The comment above describes the old 11px box and is kept only as the reason for this.
     const liftRule = /_segment:hover[^{]*\{([^}]*)\}/u.exec(css)
-    expect(liftRule?.[1], 'the lifted segment is not the smaller 11px box').toBe('height:11px')
+    expect(liftRule?.[1], 'the lifted segment does not thicken by shrinking its own padding').toBe('padding:2px 0')
     // The other bar shape follows the same painted height, so switching shapes does not
     // change how thick the bar looks.
-    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thin as the segmented one').toContain('height:4px')
+    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thin as the segmented one').toContain('height:3px')
   })
 
   it('draws one segment per step, each with an accessible name, its command and its output', async () => {

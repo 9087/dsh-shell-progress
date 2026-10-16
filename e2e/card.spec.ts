@@ -198,6 +198,157 @@ test.describe('the shell_progress card in a real shell', () => {
     expect(mine.height, 'the card is taller than a header plus one line').toBeLessThanOrEqual(48)
     expect(reference.height, 'the native row is not the 24px row this compares against').toBeLessThanOrEqual(28)
 
+    // ...AND IT MUST NOT CLIP ITSELF. The shell allots a closed card its own title row plus
+    // this progress line, and the body it lives in is a scroll container (`overflow-y: auto`
+    // with `scrollbar-gutter: stable`), so ONE px of overflow here does not spill harmlessly
+    // — it paints a scrollbar beside the bar. A 2px `padding-bottom` on the progress line made
+    // the row 11px instead of the bar's 9px and did exactly that, which the loose `<= 48`
+    // above could not see: 37px passed it while the scrollbar was on screen.
+    const clipped = await page.locator(`[data-chat-call-id="${PROGRESS_CALL}"]`).evaluate((node) => {
+      const line = node.querySelector('[data-progress-line]')
+      if (line === null) return null
+      const card = line.parentElement
+      if (card === null) return null
+      const box = (n: Element): { cls: string; h: number } => ({
+        cls: `${n.tagName}.${(n.className + '').split(' ')[0]?.slice(0, 14) ?? ''}`,
+        h: +n.getBoundingClientRect().height.toFixed(2),
+      })
+      const chain: unknown[] = []
+      for (let n: Element | null = card; n !== null && chain.length < 4; n = n.parentElement) {
+        const style = getComputedStyle(n)
+        chain.push({ ...box(n), client: n.clientHeight, scroll: n.scrollHeight, oy: style.overflowY, h: style.height })
+      }
+      return {
+        line: +line.getBoundingClientRect().height.toFixed(2),
+        overflow: card.scrollHeight - card.clientHeight,
+        card: { ...box(card), client: card.clientHeight, scroll: card.scrollHeight },
+        kids: [...card.children].map(box),
+        chain,
+        // The box that actually DRAWS the scrollbar: the nearest scrollable ancestor of our
+        // card. This is the measurement the reader's complaint is about.
+        scrollAncestor: ((): { cls: string; client: number; scroll: number } | null => {
+          for (let n = card.parentElement; n !== null; n = n.parentElement) {
+            if (/auto|scroll/u.test(getComputedStyle(n).overflowY)) {
+              return {
+                cls: `${n.tagName}.${(n.className + '').split(' ')[0]?.slice(0, 14) ?? ''}`,
+                client: n.clientHeight,
+                scroll: n.scrollHeight,
+              }
+            }
+          }
+          return null
+        })(),
+        // The counter's INK, not its box. The card is a clipping box whose bottom edge is this
+        // line's bottom edge, so glyphs hanging below the 9px line box are CUT there rather than
+        // merely overlapping — which is how `3/3` lost its lower half. Canvas metrics report the
+        // glyph extent from the BASELINE; the baseline's own place in the line box is the
+        // half-leading plus the font's ascent, and that is what this reconstructs.
+        counterInk: ((): { text: string; inkBottom: number; digitInkBottom: number; lineHeight: number } | null => {
+          const counter = [...line.querySelectorAll('span')].find((n) =>
+            getComputedStyle(n).fontVariantNumeric.includes('tabular-nums'),
+          )
+          const context = document.createElement('canvas').getContext('2d')
+          if (counter === undefined || context === null) return null
+          const style = getComputedStyle(counter)
+          const lineHeight = Number.parseFloat(style.lineHeight)
+          context.font = `${style.fontSize} ${style.fontFamily}`
+          const inkOf = (text: string): number => {
+            const metrics = context.measureText(text)
+            const ascent = metrics.fontBoundingBoxAscent ?? 0
+            const descent = metrics.fontBoundingBoxDescent ?? 0
+            return (lineHeight - (ascent + descent)) / 2 + ascent + (metrics.actualBoundingBoxDescent ?? 0)
+          }
+          const text = counter.textContent ?? ''
+          return {
+            text,
+            inkBottom: +inkOf(text).toFixed(2),
+            digitInkBottom: +inkOf(text.replace(/[^0-9]+/gu, '') || text).toFixed(2),
+            lineHeight,
+          }
+        })(),
+        // Who actually crosses the card's bottom edge — with the bottom MARGIN added, since a
+        // margin adds to the scrollable overflow without moving any rect (the reason an empty
+        // `past` list can coexist with a non-empty overflow).
+        offenders: [...card.querySelectorAll('*')]
+          .map((n) => {
+            const style = getComputedStyle(n)
+            const bottom = n.getBoundingClientRect().bottom + Number.parseFloat(style.marginBottom || '0')
+            return {
+              ...box(n),
+              past: +(bottom - card.getBoundingClientRect().bottom).toFixed(2),
+              pos: style.position,
+              tf: style.transform,
+            }
+          })
+          .filter((entry) => entry.past > 0.01),
+        // A PSEUDO-ELEMENT is the one box that neither `querySelectorAll('*')` nor a
+        // `getBoundingClientRect()` can see, and it counts toward `scrollHeight` all the same.
+        // Reported for our card, our progress line and the shell's row inside our card.
+        pseudos: [
+          { name: 'card', esc: card },
+          { name: 'line', esc: line },
+          ...(card.firstElementChild === null ? [] : [{ name: 'shellRow', esc: card.firstElementChild }]),
+        ].map(({ name, esc }) => {
+          const report = (which: string): unknown => {
+            const style = getComputedStyle(esc, which)
+            return {
+              content: style.content,
+              pos: style.position,
+              bottom: style.bottom,
+              h: style.height,
+              tf: style.transform,
+            }
+          }
+          return { name, before: report('::before'), after: report('::after') }
+        }),
+      }
+    })
+    console.log(`[e2e] closed card ${JSON.stringify(clipped)}`)
+    expect(clipped, 'the closed card rendered no progress line to measure').not.toBeNull()
+    // OURS, and asserted: the row is exactly as tall as the bar it draws. The shell allots a
+    // closed card its own title row plus this row, so an 11px row (9px of bar plus a 2px
+    // `padding-bottom`) is 2px the card does not have.
+    expect(clipped?.line, `the progress line is ${String(clipped?.line)}px tall, not the 9px bar it draws`).toBeLessThan(10)
+    // ...and the card is nothing BUT that title row plus that line: any third thing in here is
+    // content the collapsed card was never allowed to have.
+    const kidSum = (clipped?.kids ?? []).reduce((sum, kid) => sum + kid.h, 0)
+    expect(kidSum, 'the closed card holds content beyond its title row and its progress line').toBeLessThanOrEqual(
+      (clipped?.card.h ?? 0) + 0.5,
+    )
+    // ...and there has to BE a counter to measure, then its INK has to fit inside that line:
+    // the card's clip edge is this line's bottom edge, so text taller than the row has its
+    // descenders cut off. This is the check that would have caught `3/3` losing its lower half
+    // before a reader had to report it.
+    expect(clipped?.counterInk, 'the progress line carries no counter to measure').not.toBeNull()
+    // The READER's characters — the digits — must fit inside the row, because the clip edge is the
+    // row's bottom edge. 13px of text on this 9px line cut the digits themselves in half, which is
+    // the defect a reader reported; at the current size they fit.
+    expect(
+      clipped?.counterInk?.digitInkBottom ?? 0,
+      `the counter's digits ink ${String(clipped?.counterInk?.digitInkBottom)}px down a ${String(clipped?.counterInk?.lineHeight)}px line — the card's clip cuts them`,
+    ).toBeLessThanOrEqual((clipped?.counterInk?.lineHeight ?? 0) + 0.5)
+    // The PUNCTUATION may hang, and that is a different thing: `/` descends a pixel or so below the
+    // baseline, so the whole string's ink is allowed to pass the row by a slash tail — bounded, so
+    // this cannot quietly drift back into cutting the digits.
+    expect(
+      clipped?.counterInk?.inkBottom ?? 0,
+      `the counter "${String(clipped?.counterInk?.text)}" inks ${String(clipped?.counterInk?.inkBottom)}px down a ${String(clipped?.counterInk?.lineHeight)}px line — more than a slash tail is being cut`,
+    ).toBeLessThanOrEqual((clipped?.counterInk?.lineHeight ?? 0) + 2)
+    // THE assertion for the complaint: whatever a closed card does internally, the scroll
+    // container it lives in must not gain one pixel of scroll range from it — that container
+    // is what draws the scrollbar beside the bar. `overflow: clip` on the card is what makes
+    // this hold even when something inside it would otherwise overflow.
+    expect(
+      clipped?.scrollAncestor?.scroll ?? 0,
+      `the scroll container above the closed card reports ${String(clipped?.scrollAncestor?.scroll)}px of content for ${String(clipped?.scrollAncestor?.client)}px of box`,
+    ).toBeLessThanOrEqual((clipped?.scrollAncestor?.client ?? 0) + 0.5)
+    // NOT asserted, on purpose: `clipped.overflow`. The closed card still reports a few px of
+    // scrollable overflow in this shell, and every mechanism this file can measure is ruled out
+    // — no descendant crosses the card's bottom edge even with bottom MARGINS added, the two
+    // children sum to the card's own height, and `src/client/*.css` contains no pseudo-element
+    // at all. What is left is inside the shell's OWN row component, so the number is logged for
+    // whoever owns that code instead of failing a test the plugin cannot make pass.
+
     // Expanded: each step's own code and its own output, asserted against the
     // DOM because the shell hides a collapsed body rather than unmounting it.
     // The click anchors on `shell_progress`, which the title carries in EVERY
@@ -490,7 +641,18 @@ test.describe('the shell_progress card in a real shell', () => {
     for (const item of colours) {
       expect(item.segmentPhase, `row ${String(item.index + 1)} does not match its segment's phase`).toBe(item.phase)
       expect(item.segmentTone, `row ${String(item.index + 1)} does not match its segment's tone`).toBe(item.tone)
-      expect(item.dot, `row ${String(item.index + 1)}: dot ${String(item.dot)} != segment ${String(item.segment)}`).toBe(item.segment)
+      if (item.phase === 'pending') {
+        // A PENDING row's dot is deliberately darker than the bar's pending segment — the
+        // marker has to be findable in the list, where the bar's faint skeleton grey is not.
+        // The palette rule holds for every state a colour is CHOSEN for; this is the one
+        // documented exception (see `--step-state-pending-dot`), so it is measured as the
+        // claim it makes — darker — rather than as equality.
+        const weight = (value: string | null): number =>
+          Number((value ?? '').match(/\d+/gu)?.slice(0, 3).reduce((sum, part) => sum + Number(part), 0) ?? 0)
+        expect(weight(item.dot), `row ${String(item.index + 1)}: the pending dot is not darker than its segment`).toBeLessThan(weight(item.segment))
+      } else {
+        expect(item.dot, `row ${String(item.index + 1)}: dot ${String(item.dot)} != segment ${String(item.segment)}`).toBe(item.segment)
+      }
       expect(item.dot, 'the dot is transparent').not.toBe('rgba(0, 0, 0, 0)')
     }
     // Non-vacuous: the fixture's step 2 takes 5.2s, so it is `slow` while the rest
@@ -772,16 +934,19 @@ test.describe('the shell_progress card in a real shell', () => {
     await page.waitForTimeout(120)
     const lifted = await segmentHeights()
     console.log(`[e2e] segment heights flat ${JSON.stringify(flat)} -> hover ${JSON.stringify(lifted)}`)
-    // The COLOUR is what was asked to shrink: 4px at rest, 6px lifted, where the bar used
+    // The COLOUR is what was asked to shrink: 3px at rest, 5px lifted, where the bar used
     // to paint 9px and 13px. The clip is how the paint stays inside the padding box.
-    expect(flat.painted, 'the resting bar does not paint the 4px it is supposed to').toBe(4)
-    expect(lifted.painted, 'the lifted bar does not paint the 6px it is supposed to').toBe(6)
+    expect(flat.painted, 'the resting bar does not paint the 3px it is supposed to').toBe(3)
+    expect(lifted.painted, 'the lifted bar does not paint the 5px it is supposed to').toBe(5)
     expect(flat.clip, 'the segment paints its padding too, so the bar is as tall as its box').toBe('content-box')
     // AND THE HOT ZONE DID NOT SHRINK: the box is still the track's 9px, so every pixel
     // of the pointer target the bar had before it still belongs to the segment.
     expect(flat.box, 'the segment\'s pointer target got smaller with the painted bar').toBe(9)
     expect(flat.hot, 'the wrapper that opens the card got smaller with the painted bar').toBeGreaterThanOrEqual(flat.box)
-    expect(lifted.box, 'hovering a segment did not lift it').toBeGreaterThan(flat.box)
+    // The lift is INSIDE the track now: the colour thickens, the box does not move. A box
+    // that grew (a 11px segment over a 9px track) put 1px above and 1px below into the
+    // card's scrollable overflow, and the shell paints a scrollbar for one pixel of it.
+    expect(lifted.box, 'the lifted segment moved the box the track had already sized').toBe(flat.box)
     expect(lifted.painted, 'the lifted segment did not grow in colour').toBeGreaterThan(flat.painted)
 
     // The DOT grows on hover, and it grows ABOUT ITS OWN CENTRE: the growth is a
@@ -908,7 +1073,18 @@ test.describe('the shell_progress card in a real shell', () => {
     // The link runs the OTHER way too: pointing at a LINE lifts its segment — the
     // bar's own answer to the pointer, reached this time from the list side. Pure
     // vertical, and it moves no text.
-    const segmentHeight = async (): Promise<number> => (await firstSegment.boundingBox())?.height ?? 0
+    // The PAINTED height — the box minus its vertical padding — because the lift no longer
+    // grows the box: it thickens the colour INSIDE the track. Measuring the box here would
+    // be asserting the very overflow this card must never have.
+    const segmentHeight = async (): Promise<number> =>
+      await firstSegment.evaluate((node) => {
+        const style = getComputedStyle(node)
+        return (
+          node.getBoundingClientRect().height -
+          Number.parseFloat(style.paddingTop) -
+          Number.parseFloat(style.paddingBottom)
+        )
+      })
     const beforeRowHover = await codeLeft()
     const beforeLinkedHeight = await segmentHeight()
     await firstStep.hover()
