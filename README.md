@@ -11,7 +11,7 @@ English | [中文](https://github.com/9087/dsh-shell-progress/blob/main/README.z
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-339933)](https://github.com/9087/dsh-shell-progress/blob/main/package.json)
 [![CI](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml)
 [![harness matrix](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml)
-[![release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.3.0)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
+[![release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.4.1)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
 
 A DeepSeek Harness plugin that shows **where a multi-step shell command is right
 now**, as a segmented progress bar inside the tool-call card.
