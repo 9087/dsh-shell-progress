@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1](https://github.com/9087/dsh-shell-progress/compare/v0.4.0...v0.4.1) (2026-10-16)
+
+### Bug Fixes
+
+* **release:** count only the tool views in the published-bundle check ([78ff532](https://github.com/9087/dsh-shell-progress/commit/78ff5320548eb21f6e35b6a859ee1da6b1e4349d))
+
 ## [0.4.0](https://github.com/9087/dsh-shell-progress/compare/v0.3.0...v0.4.0) (2026-10-16)
 
 ### Features
