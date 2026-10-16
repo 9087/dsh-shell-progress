@@ -106,9 +106,31 @@ suite, builds, and publishes with `npm publish --provenance`.
 
 ## Verifying a release landed
 
+CI does this, and as a **gate rather than a report**. After `npm publish`, and before the
+GitHub Release is created, `release.yml` runs the same check by hand would:
+
 ```sh
-npm view dsh-shell-progress@X.Y.Z gitHead    # must equal the release commit
+node scripts/verify-release.mjs "$VERSION" --expect-git-head "$(git rev-parse HEAD)"
 ```
+
+It polls until the registry actually serves the version (a fresh publish is absent for a
+while — and `npm view` can answer from its own cache, which is how a published version once
+looked like a 404), then checks that the record was built from that commit and carries a
+provenance attestation, downloads the tarball and verifies it against the registry's own
+`dist.integrity`, confirms the files `package.json` promises are inside it (including the
+vendored grammar, which no test in this repository installs), and finally loads the
+PUBLISHED `lib/client.js` through the shell's module-loader contract and renders a
+four-step card with it.
+
+The version number alone proves none of that: `pnpm test` runs against `src/`, and the
+build writes `lib/`. A tarball can ship a stale client bundle or an absent grammar with
+every earlier gate green. To audit any published version afterwards:
+
+```sh
+pnpm run verify:release 0.2.0     # omit the version for `latest`
+```
+
+It exits non-zero and names every failed check.
 
 ## Manual fallback
 
@@ -119,7 +141,13 @@ pnpm run build
 npm publish --registry=https://registry.npmjs.org/
 ```
 
-This skips the provenance attestation, so prefer the CI path.
+This skips the provenance attestation, so prefer the CI path. It also skips the
+post-publish verification CI runs, so finish by hand — and expect the attestation line to
+be reported as a SKIP rather than a pass, because a hand-published release really has none:
+
+```sh
+pnpm run verify:release -- 0.2.0 --expect-git-head "$(git rev-parse HEAD)" --allow-no-provenance
+```
 
 ## Rules
 

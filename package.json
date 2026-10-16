@@ -56,7 +56,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "prepare": "tsc -b tsconfig.json && tsdown --env.DSH_BUILD_FACE client",
-    "release": "release-it"
+    "release": "release-it",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "license": "MIT",
   "dependencies": {

@@ -27,6 +27,15 @@ jobs:
       - run: pnpm run build
       - run: pnpm test
       - run: npm publish --provenance
+      # Verify what the REGISTRY serves, before the release is announced: every gate above
+      # this one looked at `src/` and at `lib/`, neither of which is the artifact users
+      # install. The version is absent for a while after a publish, so the script polls;
+      # it exits non-zero if the tarball is missing a promised file, if the record was
+      # built from another commit, or if the published client bundle cannot render a
+      # card — in which case the GitHub Release below never goes out. `git rev-parse HEAD`
+      # rather than `github.sha`: the checkout is already at the tag's commit, and an
+      # annotated tag's own object hash is not what npm records as `gitHead`.
+      - run: node scripts/verify-release.mjs "${{ github.ref_name }}" --expect-git-head "$(git rev-parse HEAD)"
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
