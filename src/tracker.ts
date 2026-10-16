@@ -25,6 +25,8 @@ interface StepState {
    * states at the cut, so a reader can tell a truncated step from a complete one.
    */
   droppedChars: number
+  /** The model's one-line description, or null when there is none. See `src/llm-notes.ts`. */
+  note: string | null
   startedAt: number | null
   endedAt: number | null
 }
@@ -68,6 +70,7 @@ export class StepTracker {
       lines: [],
       chars: 0,
       droppedChars: 0,
+      note: null,
       startedAt: null,
       endedAt: null,
     }))
@@ -136,6 +139,22 @@ export class StepTracker {
     return joinLines(this.preambleLines)
   }
 
+  /**
+   * Attach the model's notes, one per step in source order.
+   *
+   * A note that is missing (shorter answer, or a note for a step the model skipped) is
+   * left ABSENT rather than filled with an empty string: the card tests for the field, so
+   * an empty string would draw an empty comment line instead of nothing. Called at most
+   * once per run — the notes arrive together, from one request.
+   * @param notes - the notes in command-line order; extra entries are ignored.
+   */
+  setNotes(notes: readonly (string | undefined)[]): void {
+    this.states.forEach((state, index) => {
+      const note = notes[index]
+      if (typeof note === 'string' && note.length > 0) state.note = note
+    })
+  }
+
   /** Whether any per-step output was dropped to stay inside the budget. */
   droppedOutput(): boolean {
     return this.overBudget
@@ -151,6 +170,8 @@ export class StepTracker {
       text: state.text,
       output: joinLines(state.lines),
       droppedChars: state.droppedChars,
+      // Omitted rather than null, so "no note" adds no field to the persisted record.
+      ...(state.note === null ? {} : { note: state.note }),
       startedAt: state.startedAt,
       endedAt: state.endedAt,
     }))

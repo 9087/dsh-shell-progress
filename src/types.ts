@@ -50,6 +50,16 @@ export interface StepProgress extends StepLine {
    */
   readonly output: string
   /**
+   * One line of plain language describing what this step's command does, written by the
+   * model (`src/llm-notes.ts`).
+   *
+   * ABSENT IS THE CONTRACT. There is no note when the host has no llm service, when the
+   * call failed or timed out, and when the feature is switched off — and the card shows a
+   * note or nothing, never a placeholder. Optional on the wire for the same reason
+   * `droppedChars` is: a record persisted before this existed still validates.
+   */
+  readonly note?: string
+  /**
    * Characters the per-step output budget DISCARDED, or absent/0 when nothing was.
    *
    * This is what lets the card state the cut at the cut: `output` alone cannot say

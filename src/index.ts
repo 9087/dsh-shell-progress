@@ -253,6 +253,10 @@ const OUTPUT_SCHEMA = {
               // NOT required: a record persisted before this field existed still
               // validates, and the client reads a missing value as zero.
               droppedChars: { type: 'integer' },
+              // NOT required, and absent is the NORM: a step carries a note only when the
+              // model answered about it (see `src/llm-notes.ts`). A record written without
+              // one — or with the feature switched off — must still validate.
+              note: { type: 'string' },
               startedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
               endedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
             },
