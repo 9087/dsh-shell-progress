@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0](https://github.com/9087/dsh-shell-progress/compare/v0.3.0...v0.4.0) (2026-10-16)
+
+### Features
+
+* **client:** calm the palette, thin the bar, and keep the closed card out of the shell scroll range ([37b2e6a](https://github.com/9087/dsh-shell-progress/commit/37b2e6af45e80e91b2db6b65229c7fe176c7897b))
+* **client:** degrade a refused call to the plain card ([1b5455d](https://github.com/9087/dsh-shell-progress/commit/1b5455dd576051fd9df28442cdc6c09604891c3b))
+* **client:** keep the step elapsed time out of a selection ([5c5b388](https://github.com/9087/dsh-shell-progress/commit/5c5b38840bd92da1c026120c59e2113f4ce5a447))
+* **client:** use the shell own wording for an omitted tail ([a457f46](https://github.com/9087/dsh-shell-progress/commit/a457f46810efac2a82f50d8dc3d1f597e33f8d9d))
+* **notes:** ask for the notes beside the run, in the language the client pushed ([4026415](https://github.com/9087/dsh-shell-progress/commit/4026415c42ebf52cf33e6f55a75501d2df3ad08e))
+* **notes:** ask the model for one line per command, and stay silent on any failure ([8c54ae2](https://github.com/9087/dsh-shell-progress/commit/8c54ae2565d3a562aa4554d3a2a105f2fb02de91))
+* **notes:** carry a per-step note through the recorded meta ([ef7026b](https://github.com/9087/dsh-shell-progress/commit/ef7026b109943b573c61417a6aad9719c0eeb8fe))
+* **notes:** draw the model line as a comment above the command in the hover card ([f60c785](https://github.com/9087/dsh-shell-progress/commit/f60c785b2f7fe01cd4a404b1d213ae7421bee755))
+* **notes:** give the switch a home in DSH Settings ([d0debb6](https://github.com/9087/dsh-shell-progress/commit/d0debb6f69d49b21149b4dcea54401a1df877e51))
+* **notes:** let the client tell the host the language, over the progress channel ([1c457a0](https://github.com/9087/dsh-shell-progress/commit/1c457a0d681e421c1ba5f4ef75fbb93afea5dfe1))
+
+### Bug Fixes
+
+* **client:** carry the model note through the live snapshot ([5d7c273](https://github.com/9087/dsh-shell-progress/commit/5d7c273da89716735398aab77a27094e80c0f344))
+* **client:** give the step list one line rhythm ([68c80f0](https://github.com/9087/dsh-shell-progress/commit/68c80f010beb971faa4c3fcae74e9c9816cf3bdb))
+* **client:** label the settings tab through the shell translator ([694fd90](https://github.com/9087/dsh-shell-progress/commit/694fd90bde26c87018187f7833d89cbc5d5d2da7))
+* **client:** read the active language off the locale snapshot ([1ebba5f](https://github.com/9087/dsh-shell-progress/commit/1ebba5f2d9b6a7af0087ab9051431e82273b61be))
+* **notes:** say WHY no note was written, once per reason ([b401af1](https://github.com/9087/dsh-shell-progress/commit/b401af11d018c1a587f704d6b67e7d2aad4e97c8))
+* **release:** give the verification gate ten minutes to see a fresh publish ([d791689](https://github.com/9087/dsh-shell-progress/commit/d791689c15cf5986e2c3f6c1380d29d9f10dc61e))
+* **release:** make the publish idempotent and recover a verification timeout ([724ff39](https://github.com/9087/dsh-shell-progress/commit/724ff399b37de29b3e5e3d32ad09310420b90f17))
+
 ## [0.3.0](https://github.com/9087/dsh-shell-progress/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 ### Features
