@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 # Fires on the tag `release-it` pushes. Publishing uses npm Trusted Publishing
 # (OIDC), so there is no NPM_TOKEN secret anywhere — see PUBLISH.md for the

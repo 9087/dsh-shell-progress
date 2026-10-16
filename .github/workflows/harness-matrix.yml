@@ -1,4 +1,4 @@
-name: Harness matrix
+name: harness matrix
 
 # The only real answer to "will this still work after the host upgrades".
 #

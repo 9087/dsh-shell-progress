@@ -145,7 +145,7 @@ second attempt at a version that already exists — the re-run dies at the publi
 reaches the gate or the Release. (This is measured, not theoretical: v0.3.0's first two
 re-runs failed exactly that way.)
 
-Recover with a **dispatch** instead — Actions → Release → **Run workflow**:
+Recover with a **dispatch** instead — Actions → release → **Run workflow**:
 
 - `tag`: the tag that was released (e.g. `v0.3.0`)
 - `skip_publish`: `true`
