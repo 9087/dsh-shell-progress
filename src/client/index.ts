@@ -41,6 +41,24 @@ interface SlotsService {
 /** The slice of the locale service this plugin uses. */
 interface LocaleService {
   register(namespace: string, dictionaries: Record<string, Record<string, string>>): () => void
+  /** The shell's current locale; its snapshot names the language the reader is reading. */
+  getLocale?(): unknown
+}
+
+/** The one field read off that snapshot, checked rather than assumed. */
+interface LocaleSnapshotLike {
+  readonly id?: unknown
+}
+
+/**
+ * The one locale event this plugin listens for.
+ *
+ * Declared locally for the same reason the services above are: subscribing to it must not
+ * make this plugin depend on the package that declares it. The handler takes no arguments —
+ * the push re-reads the snapshot, so nothing about the payload has to be right.
+ */
+interface LocaleEvents {
+  on(event: 'locale/change', handler: () => void): () => void
 }
 
 /** Register the tool-call view. */
@@ -51,6 +69,37 @@ export function apply(ctx: Context): void {
 
   const port = createProgressPort(connection.rpc)
   const store = createProgressStore(port)
+
+  /**
+   * Tell the host which language to write step notes in, and whether to ask for them.
+   *
+   * The HOST makes the model request, but the GUI is the only party that knows what
+   * language the reader is reading — the host-side locale lives in a stored settings
+   * document this plugin does not read — so the two agree through this one call. The host
+   * requests NOTHING until it is told: a note in the wrong language is worse than no note.
+   *
+   * A locale we cannot read is reported rather than swallowed: leaving the language at
+   * whatever it was is right, but going quiet about WHY the notes never appear is not, and
+   * that is the failure a reader would otherwise have to guess at.
+   */
+  const pushNotePreference = (): void => {
+    const snapshot = locale.getLocale?.() as LocaleSnapshotLike | undefined
+    const id = typeof snapshot?.id === 'string' && snapshot.id.length > 0 ? snapshot.id : undefined
+    if (id === undefined) {
+      console.warn('shell-progress: the locale service named no language, so step notes stay off')
+      return
+    }
+    void port.configure({ enabled: true, locale: id })
+  }
+  ctx.effect(() => {
+    pushNotePreference()
+    return () => {}
+  }, 'ui-shell-progress: note preference')
+  // A switch of language changes the language the notes must be written in.
+  ctx.effect(
+    () => (ctx as unknown as LocaleEvents).on('locale/change', () => { pushNotePreference() }),
+    'ui-shell-progress: locale change',
+  )
 
   ctx.effect(() => locale.register(NS, { en, zh }), 'ui-shell-progress: dictionaries')
   // A reconnected transport invalidates every open poll: the host generation

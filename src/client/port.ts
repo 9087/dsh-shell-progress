@@ -25,6 +25,16 @@ export interface ProgressPort {
    * "finished" is what stopped the poll and froze the bar at its starting shape.
    */
   snapshot(callId: string): Promise<LiveSnapshot | undefined>
+  /**
+   * Tell the host the step-note preference: whether to ask for notes at all, and which
+   * language to write them in.
+   *
+   * Best effort by design. The host is the party that makes the model request, but the
+   * GUI is the only party that knows the reader's language, so this is how the two agree;
+   * a host too old to answer simply keeps its own default and nothing breaks.
+   * @param options - the switch and the reader's language.
+   */
+  configure(options: { readonly enabled: boolean; readonly locale: string }): Promise<void>
 }
 
 /** The empty answer, used for every malformed or absent wire value. */
@@ -109,6 +119,15 @@ export function createProgressPort(rpc: ClientConnectionRpc): ProgressPort {
       // card renders from its own metadata regardless.
       if (!result.ok) return undefined
       return snapshotOf(result.value)
+    },
+    async configure(options) {
+      // A refusal is not the caller's business: there is nothing a caller could do about a
+      // host that does not know this endpoint, and the note is a convenience.
+      try {
+        await rpc.call(PROGRESS_CHANNEL, 'configure', { enabled: options.enabled, locale: options.locale })
+      } catch {
+        // Ignored on purpose — see above.
+      }
     },
   }
 }

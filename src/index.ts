@@ -455,6 +455,18 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   const handle: ChannelHandler = async (endpoint, payload) => {
     try {
+      // The client's note preference. Not a snapshot verb: it carries no call id and
+      // answers with the setting the host is now using, so a client can confirm what took.
+      if (endpoint === 'configure') {
+        const record = typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+          ? payload as { readonly enabled?: unknown; readonly locale?: unknown }
+          : {}
+        setStepNotesOptions({
+          ...typeof record.enabled === 'boolean' ? { enabled: record.enabled } : {},
+          ...typeof record.locale === 'string' ? { locale: record.locale } : {},
+        })
+        return { ok: true, value: { enabled: notesConfig.enabled, locale: notesConfig.locale ?? null } }
+      }
       if (endpoint !== 'snapshot') return rpcError(`unknown endpoint ${JSON.stringify(endpoint)}`)
       const callId = typeof payload === 'object' && payload !== null && !Array.isArray(payload)
         ? (payload as { readonly callId?: unknown }).callId
