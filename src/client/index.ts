@@ -55,9 +55,17 @@ interface LocaleService {
   getLocale?(): unknown
 }
 
-/** The one field read off that snapshot, checked rather than assumed. */
+/**
+ * The one field this plugin reads off a locale snapshot.
+ *
+ * `active` — NOT `id`. A snapshot names the ACTIVE language in `active`; `id` belongs to
+ * `LocaleDefinition`, one selectable locale inside the snapshot's `locales` list. Reading
+ * `id` found nothing on every host, so the notes were switched off for every reader while
+ * the tab's own label (which goes through `bind`) kept working — which is exactly the pair
+ * of symptoms a reader reported.
+ */
 interface LocaleSnapshotLike {
-  readonly id?: unknown
+  readonly active?: unknown
 }
 
 /**
@@ -97,7 +105,7 @@ export function apply(ctx: Context): void {
     // The id comes from the CHANGED snapshot when the shell hands one over — that is the
     // shell saying which language is now active — and from the current snapshot otherwise.
     const snapshot = (changed ?? locale.getLocale?.()) as LocaleSnapshotLike | undefined
-    const id = typeof snapshot?.id === 'string' && snapshot.id.length > 0 ? snapshot.id : undefined
+    const id = typeof snapshot?.active === 'string' && snapshot.active.length > 0 ? snapshot.active : undefined
     if (id === undefined) {
       console.warn('shell-progress: the locale service named no language, so step notes stay off')
       return
@@ -122,7 +130,7 @@ export function apply(ctx: Context): void {
     const bound = locale.bind?.call(locale, NS)
     if (typeof bound === 'function') return bound(key)
     const snapshot = locale.getLocale?.() as LocaleSnapshotLike | undefined
-    const id = typeof snapshot?.id === 'string' ? snapshot.id : ''
+    const id = typeof snapshot?.active === 'string' ? snapshot.active : ''
     return (id.startsWith('zh') ? zh : en)[key as keyof typeof en] ?? key
   }
   ctx.effect(() => {
