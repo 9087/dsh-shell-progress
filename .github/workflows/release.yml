@@ -3,9 +3,32 @@ name: Release
 # Fires on the tag `release-it` pushes. Publishing uses npm Trusted Publishing
 # (OIDC), so there is no NPM_TOKEN secret anywhere — see PUBLISH.md for the
 # one-time npmjs.com setup this depends on.
+#
+# `workflow_dispatch` exists for RECOVERY, not for routine releases. Every step below runs in
+# ONE job, so a failure after the artifact is public — a registry slow to serve the new
+# version, a flaky API call, a gate that gives up early — leaves the version on npm and
+# unannounced, and "Re-run failed jobs" cannot repair it: a re-run starts the job from its
+# first step, and npm refuses to accept a second publish of the same version. Dispatching
+# with the released tag and `skip_publish=true` skips the publish, re-verifies the artifact
+# that is already public, and creates the Release. A dispatch reads THIS file from the
+# default branch, which is exactly why it can rescue a tag whose own copy predates a fix.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'existing release tag to verify and announce (e.g. v0.3.0)'
+        required: true
+      skip_publish:
+        description: 'skip the publish — the version is already public'
+        type: boolean
+        default: true
+
+# One release at a time: two runs must never race the same tag or the registry.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -13,8 +36,17 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      # The tag this run is about, whatever triggered it: a tag push names it in the ref, a
+      # recovery dispatch names it in an input.
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A tag push checks out that tag; a dispatch checks out the tag it was given. In
+          # both paths `git rev-parse HEAD` is therefore the released commit — which is what
+          # the verification below compares the registry's `gitHead` against.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -26,16 +58,78 @@ jobs:
       # Build before test: the client-bundle suite runs the built `lib/client.js`.
       - run: pnpm run build
       - run: pnpm test
-      - run: npm publish --provenance
+      # Publishing is IDEMPOTENT because this job cannot be resumed. A second attempt at an
+      # existing version is refused by the registry, so without this guard any failure after
+      # this step would be permanent: the version public, the Release never created, and the
+      # run impossible to re-run. The guard must never skip the VERIFICATION below — that is
+      # what proves the already-public artifact is this commit's.
+      - name: Publish to the registry unless the version is already there
+        env:
+          SKIP_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_publish || 'false' }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version="${RELEASE_TAG#v}"
+          if [ "${SKIP_PUBLISH}" = "true" ]; then
+            echo "::notice::skip_publish was requested — not publishing ${name}@${version}"
+            exit 0
+          fi
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${name}@${version} is already on the registry — not publishing again"
+            exit 0
+          fi
+          set +e
+          output=$(npm publish --provenance 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "${output}"
+          if [ "${status}" -eq 0 ]; then
+            exit 0
+          fi
+          # The version can appear between the check above and this attempt (or the check can
+          # be answered from a cache). npm says which refusal it is, in words. THAT refusal is
+          # a state this job can verify rather than a failure to report; every other error
+          # still fails the run.
+          if printf '%s' "${output}" | grep -q 'cannot publish over the previously published versions'; then
+            echo "::warning::the registry already holds this version — continuing to verification"
+            exit 0
+          fi
+          exit "${status}"
       # Verify what the REGISTRY serves, before the release is announced: every gate above
       # this one looked at `src/` and at `lib/`, neither of which is the artifact users
-      # install. The version is absent for a while after a publish, so the script polls;
-      # it exits non-zero if the tarball is missing a promised file, if the record was
-      # built from another commit, or if the published client bundle cannot render a
-      # card — in which case the GitHub Release below never goes out. `git rev-parse HEAD`
-      # rather than `github.sha`: the checkout is already at the tag's commit, and an
-      # annotated tag's own object hash is not what npm records as `gitHead`.
-      - run: node scripts/verify-release.mjs "${{ github.ref_name }}" --expect-git-head "$(git rev-parse HEAD)"
+      # install. The version is absent for a while after a publish, so the script polls; it
+      # exits non-zero if the tarball is missing a promised file, if the record was built
+      # from another commit, or if the published client bundle cannot render a card — in
+      # which case the GitHub Release below never goes out. `git rev-parse HEAD` rather than
+      # `github.sha`: the checkout is already at the tag's commit, and an annotated tag's own
+      # object hash is not what npm records as `gitHead`.
+      - name: Verify the artifact the registry serves
+        run: node scripts/verify-release.mjs "${RELEASE_TAG}" --expect-git-head "$(git rev-parse HEAD)"
+      # `tag_name` is stated rather than inferred: on a dispatch `github.ref` is the BRANCH
+      # the workflow was run from, and the Release would be announced against it.
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
+      # A failed gate is supposed to skip the Release, so this step explains the state a
+      # human is actually in — which is often "public but unannounced" — where they will
+      # look for it, instead of leaving them to notice that two pages disagree.
+      - name: Explain what a failed gate means
+        if: failure()
+        run: |
+          {
+            echo '## The release gate failed'
+            echo
+            echo 'A step above failed. If the publish step had already run, the version IS on'
+            echo 'the registry even though this run is red — and **this job cannot be re-run**:'
+            echo 'a re-run starts from the first step, and the registry refuses a second'
+            echo 'attempt at a version that already exists.'
+            echo
+            echo 'Recover it with **Run workflow** (Actions → Release → Run workflow):'
+            echo
+            echo "- \`tag\`: the released tag"
+            echo '- \`skip_publish\`: true'
+            echo
+            echo 'That skips the publish, re-verifies the artifact that is already public, and'
+            echo 'creates the GitHub Release. See PUBLISH.md § "When a release fails after'
+            echo 'publishing".'
+          } >> "${GITHUB_STEP_SUMMARY}"

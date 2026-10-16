@@ -58,9 +58,21 @@ import { createRequire } from 'node:module'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const REPO = dirname(fileURLToPath(new URL('.', import.meta.url)))
+// The repository root, which is this file's parent directory. Under vitest `import.meta.url`
+// is not a usable file URL — it is whatever the runner substituted, and `fileURLToPath`
+// refuses it — so the runner's cwd, the repository root every other spec resolves paths from,
+// is the fallback. Hence the try: the scheme check alone is not enough to know.
+function repositoryRoot() {
+  try {
+    return dirname(fileURLToPath(new URL('.', import.meta.url)))
+  } catch {
+    return process.cwd()
+  }
+}
+
+const REPO = repositoryRoot()
 const MANIFEST = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'))
 
 /** Measurements this repository pinned; every bound below is one of them. */
@@ -107,6 +119,11 @@ async function fetchJson(url) {
   return { status: response.status, body: await response.json() }
 }
 
+/** The default pause between two polls of the registry. */
+function defaultSleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms) })
+}
+
 /**
  * Wait until the registry serves one version, and return its manifest.
  *
@@ -114,20 +131,38 @@ async function fetchJson(url) {
  * packument can lag behind the version document. Polling the VERSION endpoint is
  * deliberate — it is the smallest document that cannot be satisfied by a stale
  * packument, and it 404s until the real record exists.
+ *
+ * The clock, the pause and the read are all injected so that THIS LOOP can be tested
+ * without a network. It is the one path a hand-run cannot stage: the scenario it exists for
+ * — a version that is published but not yet served — lasts minutes and happens once per
+ * release. The first release this gate ever guarded failed on nothing but this budget, so
+ * the loop's behaviour deserves a test rather than a hand-picked constant.
  * @param {string} name - the package name.
  * @param {string} version - the version to wait for.
- * @param {number} timeoutMs - how long to keep asking.
- * @returns {Promise<Record<string, unknown> | undefined>} the manifest, or undefined.
+ * @param {object} [options] - injection points, all optional.
+ * @param {number} [options.timeoutMs] - how long to keep asking. Defaults to ten minutes.
+ * @param {number} [options.intervalMs] - pause between attempts. Defaults to five seconds.
+ * @param {(url: string) => Promise<{ status: number, body?: unknown }>} [options.fetchJson] - the registry read.
+ * @param {(ms: number) => Promise<void>} [options.sleep] - the pause.
+ * @param {() => number} [options.now] - the clock.
+ * @returns {Promise<Record<string, unknown> | undefined>} the manifest, or undefined when the budget ran out.
  */
-async function waitForVersion(name, version, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
+export async function waitForVersion(name, version, options = {}) {
+  const {
+    timeoutMs = 600_000,
+    intervalMs = 5_000,
+    fetchJson: read = fetchJson,
+    sleep = defaultSleep,
+    now = Date.now,
+  } = options
+  const deadline = now() + timeoutMs
   let last = 'no answer yet'
   for (;;) {
-    const answer = await fetchJson(`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`)
+    const answer = await read(`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`)
     if (answer.body !== undefined) return answer.body
     last = `HTTP ${String(answer.status)}`
-    if (Date.now() >= deadline) break
-    await new Promise((resolve) => { setTimeout(resolve, 5_000) })
+    if (now() >= deadline) break
+    await sleep(intervalMs)
   }
   console.log(`       (waited ${String(Math.round(timeoutMs / 1000))}s; last answer ${last})`)
   return undefined
@@ -299,7 +334,7 @@ async function main() {
 
   console.log(`verify-release: ${name}@${version}${expectedGitHead === undefined ? '' : ` (expected commit ${expectedGitHead.slice(0, 8)})`}`)
 
-  const manifest = await waitForVersion(name, version, timeoutMs)
+  const manifest = await waitForVersion(name, version, { timeoutMs })
   const served = manifest === undefined ? `nothing at ${name}@${version}` : `${name}@${String(manifest.version)}`
   if (!check('the registry serves the version', manifest !== undefined, served)) return report()
   const resolvedVersion = String(manifest.version)
@@ -409,4 +444,8 @@ function report() {
   process.exitCode = 1
 }
 
-await main()
+// Run only when this file IS the program. The waiting loop above is exported so a test can
+// drive it with a fake registry, and importing this module must not start a release check.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main()
+}

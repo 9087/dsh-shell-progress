@@ -134,6 +134,35 @@ pnpm run verify:release 0.2.0     # omit the version for `latest`
 
 It exits non-zero and names every failed check.
 
+## When a release fails after publishing
+
+Every step of `release.yml` runs in **one job**, so a failure after the publish step leaves a
+state that is easy to misread: the version IS on the registry, and the GitHub Release was
+never created. The badge and the release page disagree with npm, and neither says why.
+
+**Do not re-run that job.** A re-run starts from the first step, and the registry refuses a
+second attempt at a version that already exists — the re-run dies at the publish and never
+reaches the gate or the Release. (This is measured, not theoretical: v0.3.0's first two
+re-runs failed exactly that way.)
+
+Recover with a **dispatch** instead — Actions → Release → **Run workflow**:
+
+- `tag`: the tag that was released (e.g. `v0.3.0`)
+- `skip_publish`: `true`
+
+That checks out the tag's tree, skips the publish, runs the same verification against the
+artifact that is already public, and creates the Release. It reads the workflow file from the
+**default branch**, so it also works for a tag whose own copy of the file predates a fix.
+
+The publish step is idempotent for the same reason: it asks the registry first, and it reads
+npm's own refusal ("cannot publish over the previously published versions") as *already
+published* rather than as a failure. What it must never do is skip the verification — proving
+that the public artifact is this commit's is the whole point of the gate.
+
+One thing a dispatch cannot repair: the release workflow's **badge**. It shows the status of
+the tag-triggered run for the ref it names, so a tag whose run failed stays red even after the
+Release exists. The pin moves with the next release (`?branch=<new tag>` in both READMEs).
+
 ## Manual fallback
 
 Only if CI cannot run:
