@@ -69,8 +69,13 @@ const PROGRESS_META = {
   partial: false,
   preamble: '',
   steps: [
-    { line: 1, text: 'Write-Output "[1/4] fetch"', output: '[1/4] fetch', startedAt: 0, endedAt: 1_200 },
-    { line: 2, text: 'Write-Output "[2/4] build"', output: '[2/4] build', startedAt: 1_200, endedAt: 6_400 },
+    // `note` on the first two steps and absent on the last two ON PURPOSE: the card must
+    // draw the model's line where there is one and NOTHING where there is not (a blank
+    // comment line would be worse than no note), and the e2e asserts both halves. The
+    // fixture has no model, so these are the only notes any test can see — written in the
+    // language of the host that renders them (the suite's own home is `zh`).
+    { line: 1, text: 'Write-Output "[1/4] fetch"', output: '[1/4] fetch', note: '拉取依赖并写入本地缓存', startedAt: 0, endedAt: 1_200 },
+    { line: 2, text: 'Write-Output "[2/4] build"', output: '[2/4] build', note: '编译产物到输出目录', startedAt: 1_200, endedAt: 6_400 },
     { line: 3, text: 'Write-Output "[3/4] test"', output: '[3/4] test', startedAt: 6_400, endedAt: 7_600 },
     { line: 4, text: 'Write-Output "[4/4] pack"', output: '[4/4] pack', startedAt: 7_600, endedAt: 8_000 },
   ],

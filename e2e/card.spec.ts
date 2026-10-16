@@ -833,6 +833,7 @@ test.describe('the shell_progress card in a real shell', () => {
       const command = node.querySelector('[data-card-command]')
       const divider = node.querySelector('[data-card-divider]')
       const output = node.querySelector('[data-card-output]')
+      const note = node.querySelector('[data-card-note]')
       const contentStyle = content === null ? null : getComputedStyle(content)
       return {
         padding: contentStyle === null ? null : [contentStyle.paddingTop, contentStyle.paddingLeft],
@@ -841,6 +842,13 @@ test.describe('the shell_progress card in a real shell', () => {
         clockText: node.querySelector('[data-card-time]')?.textContent ?? null,
         outputText: output?.textContent ?? null,
         outputExists: output !== null,
+        noteText: note?.textContent ?? null,
+        noteExists: note !== null,
+        // ABOVE the command in document order, which is what "on the line above the code"
+        // means once the card is the column it is: the model's line is an annotation ABOUT
+        // this command, so it has to come first.
+        noteBeforeCommand: note !== null && command !== null
+          && (note.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
         divider: divider === null ? null : {
           width: divider.getBoundingClientRect().width,
           borderTop: getComputedStyle(divider).borderTopWidth,
@@ -875,6 +883,42 @@ test.describe('the shell_progress card in a real shell', () => {
     // The step's own output, under that divider.
     expect(hover.outputExists, 'the card has no output block').toBe(true)
     expect(hover.outputText, 'the output under the divider is not this step\'s own').toBe('[1/4] fetch')
+    // ---------------------------------------------------------------------------------
+    // THE MODEL'S LINE, drawn as a comment above the command it describes.
+    //
+    // The fixture writes notes on the first two steps and NONE on the last two, which is
+    // the whole contract in one card: show the note where there is one, and draw NOTHING
+    // where there is not (a blank comment line would be worse than no note at all). No
+    // model runs in this fixture, so these are the only notes any test can see.
+    // ---------------------------------------------------------------------------------
+    expect(hover.noteExists, 'the step card lost the model note').toBe(true)
+    expect(hover.noteText, 'the note is not this step\'s own, written as a comment').toBe('# 拉取依赖并写入本地缓存')
+    expect(hover.noteBeforeCommand, 'the note is not ABOVE the command it describes').toBe(true)
+    {
+      // The SAME card's segments, named explicitly rather than relying on a page-wide
+      // locator: another progress card's bar would answer `nth(2)` with a different step.
+      const steps = card.locator('[role="progressbar"] [data-phase]')
+      /** Every hover card currently open, in DOM order. */
+      const openCards = async (): Promise<{ command: string | null; note: string | null }[]> =>
+        await page.locator('body > div:has(> [data-step-card])').evaluateAll((nodes) => nodes.map((node) => ({
+          command: node.querySelector('[data-card-command]')?.textContent ?? null,
+          note: node.querySelector('[data-card-note]')?.textContent ?? null,
+        })))
+      await steps.nth(2).hover()
+      await page.waitForTimeout(250)
+      // The PREVIOUS card can still be in the DOM while the new one opens, so this picks
+      // the card that belongs to the hovered step instead of trusting DOM order.
+      const cards = await openCards()
+      const bare = cards.find((entry) => (entry.command ?? '').includes('[3/4] test'))
+      expect(bare, `hovering the third segment opened no card for it; open cards: ${JSON.stringify(cards)}`).toBeDefined()
+      expect(bare?.note, 'a step with no note drew one anyway').toBeNull()
+      // ...and the pointer goes BACK, so every measurement below sees the card it saw.
+      await steps.first().hover()
+      await page.waitForTimeout(250)
+      const back = (await openCards()).find((entry) => (entry.command ?? '').includes('[1/4] fetch'))
+      expect(back, 'the first segment\'s card did not come back').toBeDefined()
+      expect(back?.note, 'the note is gone after the pointer returned').not.toBeNull()
+    }
     // AND SYNTAX HIGHLIGHTING DOES REACH IT: the command line carries token spans, which
     // is what a node-valued `content` buys and a string-valued `label` could not. This is
     // the assertion that replaced the one pinning the absence.
