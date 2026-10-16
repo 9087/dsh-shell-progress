@@ -57,7 +57,7 @@ export function emptySnapshot(): LiveSnapshot {
 function stepOf(value: unknown): StepProgress | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
-  const { line, text, output, startedAt, endedAt, droppedChars } = record
+  const { line, text, output, startedAt, endedAt, droppedChars, note } = record
   if (typeof line !== 'number' || !Number.isFinite(line)) return undefined
   if (typeof text !== 'string' || typeof output !== 'string') return undefined
   return {
@@ -69,6 +69,13 @@ function stepOf(value: unknown): StepProgress | undefined {
     ...typeof droppedChars === 'number' && Number.isFinite(droppedChars) && droppedChars > 0
       ? { droppedChars }
       : {},
+    // The model's line, narrowed like everything else on this wire. It HAS to survive here:
+    // the note is attached to the host's tracker while the command is still running, and
+    // this is the only path it can take to the card before the command settles. Dropping it
+    // meant a note appeared only once the run was over — the exact bug a reader reported,
+    // and one the settled card could not reveal, because that path reads the persisted meta
+    // instead of this wire.
+    ...typeof note === 'string' && note.length > 0 ? { note } : {},
     startedAt: typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : null,
     endedAt: typeof endedAt === 'number' && Number.isFinite(endedAt) ? endedAt : null,
   }

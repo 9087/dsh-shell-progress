@@ -47,3 +47,51 @@ describe('snapshotOf', () => {
     expect(emptySnapshot().refused).toBe(false)
   })
 })
+
+/**
+ * The LIVE half of the model note.
+ *
+ * A note is attached to the host's tracker while the command is still RUNNING, so the only
+ * way it can reach the card before the command settles is this wire. It was dropped here
+ * once, which is why a note appeared only after the run was over — and nothing else in the
+ * suite could see it, because the settled card reads its notes from the persisted meta
+ * rather than from this snapshot.
+ */
+describe('a live step row', () => {
+  /**
+   * One live record with a single step.
+   * @param note - the note to attach, or omitted for a step that has none.
+   * @returns the wire value.
+   */
+  const row = (note?: unknown) => ({
+    found: true,
+    running: true,
+    instrumented: true,
+    refused: false,
+    partial: false,
+    current: 1,
+    total: 1,
+    elapsedMs: 10,
+    preamble: '',
+    steps: [
+      {
+        line: 1,
+        text: 'pnpm run build',
+        output: '',
+        startedAt: 0,
+        endedAt: null,
+        ...note === undefined ? {} : { note },
+      },
+    ],
+  })
+
+  it('carries the model note through to the live snapshot', () => {
+    expect(snapshotOf(row('构建产物'))?.steps[0]?.note).toBe('构建产物')
+  })
+
+  it('drops a note that is not a non-empty string', () => {
+    expect(snapshotOf(row(42))?.steps[0]?.note).toBeUndefined()
+    expect(snapshotOf(row(''))?.steps[0]?.note).toBeUndefined()
+    expect(snapshotOf(row())?.steps[0]?.note).toBeUndefined()
+  })
+})
