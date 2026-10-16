@@ -1,0 +1,72 @@
+/* The settings row: the shell draws the page, this draws the line inside it.
+ *
+ * Colours come from the shell's own tokens, not from literals, so the page follows the theme
+ * and matches the rows the shell itself contributes. The fallbacks exist only for a host that
+ * renders this component without its theme attached. */
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  color: var(--dsw-alias-label-primary, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+}
+
+.desc {
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 1.5;
+}
+
+/* A pill whose knob moves. Off is the quiet track; on is the system's own accent — the same
+ * token the bar's single-fill shape paints with, so "on" means the same thing in both places. */
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background-color: var(--dsw-alias-bg-skeleton, rgba(128, 128, 128, 0.35));
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+
+.switch[data-enabled='true'] {
+  background-color: var(--dsw-alias-state-business-primary, #4176e6);
+}
+
+.knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: #fff;
+  transition: transform 120ms ease-out;
+}
+
+.switch[data-enabled='true'] .knob {
+  transform: translateX(14px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .knob {
+    transition: none;
+  }
+}

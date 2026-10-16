@@ -332,7 +332,11 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // injected as a module side effect — so this call is the subject.
     entry.factory(loaderRequire)
     const styles = Array.from(document.querySelectorAll('style[data-plugin="dsh-shell-progress"]'))
-    expect(styles).toHaveLength(3)
+    // ONE STYLESHEET PER CSS MODULE, counted: Row, ProgressBar, StepList and SettingsSection.
+    // The number is the point — a module that stopped being injected (a typo in an import, a
+    // file left out of the bundle) would silently leave a surface unstyled, and nothing else
+    // in the suite would notice.
+    expect(styles).toHaveLength(4)
     const css = styles.map((node) => node.textContent ?? '').join('\n')
     // The two declarations that make the bar visible. Their absence is the exact
     // regression this suite exists for: a rendered height and a width FLOOR. (The track

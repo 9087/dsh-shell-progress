@@ -46,6 +46,11 @@ export const en = {
   'status.running': 'Running',
   'status.pending': 'Not started',
   'status.failed': 'Finished after an error',
+  /* The DSH Settings section. The label names the PLUGIN, the way the shell names every other
+   * section after the feature it configures rather than after one of its rows. */
+  'settings.tabLabel': 'Shell Progress',
+  'settings.notes': 'Explain each command line',
+  'settings.notesDesc': 'Ask the model for one short line about what each step of a command does, shown above that line in the step hover card. It costs one small request per command, and sends the command text to the model.',
 } as const
 
 /** Simplified Chinese messages. */
@@ -69,6 +74,9 @@ export const zh: Record<keyof typeof en, string> = {
   'status.running': '执行中',
   'status.pending': '未开始',
   'status.failed': '执行结束但有错误',
+  'settings.tabLabel': '命令进度',
+  'settings.notes': '为每条命令生成说明',
+  'settings.notesDesc': '让模型为命令的每一步写一行简短说明，显示在步骤悬停卡片中该行代码的上方。每条命令会多一次小请求，命令文本会发送给模型。',
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

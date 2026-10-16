@@ -159,12 +159,20 @@ describe('the built client bundle', () => {
     // declaration and leave with this plugin's fiber. It runs ONCE PER WIRE NAME:
     // a name the client registers no view for falls back to the generic tool row,
     // so a missing view is a progress bar that silently never appears.
-    expect(injectedSlots).toEqual(['tool.call.toolview', 'tool.call.toolview'])
-    expect(registrations).toHaveLength(2)
+    // THREE seats: the two toolview keys (one per dialect) and this plugin's DSH Settings
+    // section. The section goes through the same `slots.inject` path on purpose — a slot
+    // owned by another package has to be WAITED for, never assumed to exist yet.
+    expect(injectedSlots).toEqual(['tool.call.toolview', 'tool.call.toolview', 'settings.section'])
+    // Two tool CALL views and one settings section, in apply order.
+    expect(registrations).toHaveLength(3)
+    const views = registrations.filter((entry) => entry.options.name === 'tool.call.toolview')
+    const sections = registrations.filter((entry) => entry.options.name === 'settings.section')
+    expect(views, 'the two dialect views are not both registered').toHaveLength(2)
+    expect(sections, 'this plugin has no DSH Settings section').toHaveLength(1)
     // The wire tool names — and never `pwsh`.
-    expect(registrations.map((entry) => entry.options.key))
+    expect(views.map((entry) => entry.options.key))
       .toEqual(['shell_progress_pwsh', 'shell_progress_bash'])
-    for (const entry of registrations) {
+    for (const entry of views) {
       expect(entry.options.name).toBe('tool.call.toolview')
       expect(entry.options.locale).toBe('shell-progress')
     }

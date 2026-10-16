@@ -16,6 +16,8 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { TOOL_NAMES } from '../types.ts'
 import { en, NS, zh } from './locales.ts'
 import { createProgressPort } from './port.ts'
+import { SettingsSection } from './SettingsSection.tsx'
+import { notesEnabled, onNotesEnabledChange } from './notes-preference.ts'
 import { ShellProgressRow } from './Row.tsx'
 import type { ShellProgressFace } from './Row.tsx'
 import { createProgressStore } from './store.ts'
@@ -89,7 +91,21 @@ export function apply(ctx: Context): void {
       console.warn('shell-progress: the locale service named no language, so step notes stay off')
       return
     }
-    void port.configure({ enabled: true, locale: id })
+    void port.configure({ enabled: notesEnabled(), locale: id })
+  }
+
+  /**
+   * The settings tab's own label, in the language the client is rendering.
+   *
+   * The shell asks for a STRING here, so it cannot resolve our dictionary key itself; this
+   * plugin ships exactly two languages (`en`, `zh`), and picking between two shipped
+   * dictionaries is cheaper and far more honest than guessing at a translator the shell
+   * might hand us in a different shape.
+   */
+  const tabLabel = (): string => {
+    const snapshot = locale.getLocale?.() as LocaleSnapshotLike | undefined
+    const id = typeof snapshot?.id === 'string' ? snapshot.id : ''
+    return id.startsWith('zh') ? zh['settings.tabLabel'] : en['settings.tabLabel']
   }
   ctx.effect(() => {
     pushNotePreference()
@@ -127,6 +143,25 @@ export function apply(ctx: Context): void {
       // A refused seat must cost this one surface, not the whole client boot.
       console.error(`shell-progress could not fill tool.call.toolview for ${toolName}:`, error)
     }
+  }
+
+  // The switch, wired to the host: flipping it re-sends the preference, so the next command
+  // either asks the model or does not. Without this the switch would only change what the
+  // settings page looks like.
+  ctx.effect(() => onNotesEnabledChange(() => { pushNotePreference() }), 'ui-shell-progress: note switch')
+
+  // This plugin's page in DSH Settings, seated in its OWN guard: a host that refuses this
+  // must cost the settings page, never the card above.
+  try {
+    slots.inject('settings.section', () => slots.register({
+      name: 'settings.section',
+      id: 'shell-progress',
+      order: 100,
+      label: tabLabel,
+      locale: NS,
+    }, SettingsSection))
+  } catch (error) {
+    console.error('shell-progress could not seat its settings section:', error)
   }
 }
 
