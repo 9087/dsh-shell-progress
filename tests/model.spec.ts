@@ -205,6 +205,19 @@ describe('viewFromSettled', () => {
     expect(view.bar).toBe('none')
   })
 
+  it('keeps the refusal REASON through the settled record, so the tooltip can state it', () => {
+    // Narrowing is field by field here, and a field left out of it is silently lost — which
+    // is exactly what happened to the reason: the live card had it, the reloaded card did not.
+    const meta = metaOf({
+      meta: { v: 1, instrumented: false, refused: true, refusedReason: 'unbalanced', partial: false, preamble: '', steps: [] },
+    })
+    expect(meta?.refusedReason).toBe('unbalanced')
+    // A code this client has no wording for is NOT passed on: the card would translate a
+    // reason it does not know, and the generic sentence is the honest fallback.
+    const unknown = metaOf({ meta: { v: 1, refused: true, refusedReason: 'quantum', steps: [] } })
+    expect(unknown?.refusedReason).toBeUndefined()
+  })
+
   it('does not call an ordinary single-step command refused', () => {
     const view = viewFromSettled({
       v: 1,

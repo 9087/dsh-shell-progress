@@ -33,7 +33,7 @@ import type { ReactNode } from 'react'
 import { DisclosureRow, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import type { LiveSnapshot } from '../types.ts'
+import type { LiveSnapshot, RefusalCode } from '../types.ts'
 import { NS } from './locales.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
@@ -117,6 +117,37 @@ export type ShellProgressRowProps =
   & PropsLocale<typeof NS>
   & InjectFace<ShellProgressFace>
 
+/**
+ * The `⚠` tooltip's sentence: what was not tracked, then WHY — in the reader's language.
+ *
+ * The host sends a CODE rather than the sentence it logged (see `RefusalCode`), because a
+ * logged sentence would come back in whichever language the writing host used. An absent
+ * code (an older record, or a host that did not say) leaves the generic sentence.
+ * @param t - this namespace's translator.
+ * @param code - why the command was refused, when the host said.
+ * @returns the tooltip's text.
+ */
+function untrackedLabel(t: ShellProgressRowProps['t'], code: RefusalCode | undefined): string {
+  if (code === undefined) return t('row.untracked')
+  const reason = ((): string => {
+    switch (code) {
+      case 'block-comment': return t('row.reason.block-comment')
+      case 'here-string': return t('row.reason.here-string')
+      case 'line-continuation': return t('row.reason.line-continuation')
+      case 'unterminated-quote': return t('row.reason.unterminated-quote')
+      case 'unbalanced': return t('row.reason.unbalanced')
+      case 'syntax-error': return t('row.reason.syntax-error')
+      case 'no-answer': return t('row.reason.no-answer')
+      case 'unsplittable': return t('row.reason.unsplittable')
+      case 'too-many-steps': return t('row.reason.too-many-steps')
+      case 'already-instrumented': return t('row.reason.already-instrumented')
+      case 'reserved-variable': return t('row.reason.reserved-variable')
+      case 'read-only': return t('row.reason.read-only')
+    }
+  })()
+  return `${t('row.untracked')}${t('row.untracked.reason', { reason })}`
+}
+
 /** The registered component. */
 export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   const { block, callId, toolName, t, useProgress, watchCall } = props
@@ -186,7 +217,7 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
         keepContentWhenOpen
         collapsedContent={(
           <>
-            {view.refused ? <UntrackedMark label={t('row.untracked')} /> : null}
+            {view.refused ? <UntrackedMark label={untrackedLabel(t, view.refusedReason)} /> : null}
             {args.description === undefined ? null : (
               <>
                 <span className={styles.sep} aria-hidden="true" />

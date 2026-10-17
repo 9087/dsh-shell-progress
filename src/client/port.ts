@@ -12,7 +12,34 @@
 
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
 import { PROGRESS_CHANNEL } from '../types.ts'
-import type { LiveSnapshot, StepProgress } from '../types.ts'
+import type { LiveSnapshot, RefusalCode, StepProgress } from '../types.ts'
+
+/**
+ * The refusal codes this client knows.
+ *
+ * A wire value outside this set is `null`: a NEWER host may add a reason this client has no
+ * wording for, and guessing one would put a wrong sentence in the tooltip. The generic
+ * sentence is what an unknown reason falls back to.
+ */
+const REFUSAL_CODES: ReadonlySet<string> = new Set<RefusalCode>([
+  'block-comment',
+  'here-string',
+  'line-continuation',
+  'unterminated-quote',
+  'unbalanced',
+  'syntax-error',
+  'no-answer',
+  'unsplittable',
+  'too-many-steps',
+  'already-instrumented',
+  'reserved-variable',
+  'read-only',
+])
+
+/** Narrow one refusal code from the wire. Exported for the SETTLED record's own narrowing. */
+export function refusalCodeOf(value: unknown): RefusalCode | null {
+  return typeof value === 'string' && REFUSAL_CODES.has(value) ? value as RefusalCode : null
+}
 
 /** This plugin's business verbs over {@link PROGRESS_CHANNEL}. */
 export interface ProgressPort {
@@ -44,6 +71,7 @@ export function emptySnapshot(): LiveSnapshot {
     running: false,
     instrumented: false,
     refused: false,
+    refusedReason: null,
     partial: false,
     current: null,
     total: 0,
@@ -103,6 +131,7 @@ export function snapshotOf(value: unknown): LiveSnapshot | undefined {
     running: record.running === true,
     instrumented: record.instrumented === true,
     refused: record.refused === true,
+    refusedReason: refusalCodeOf(record.refusedReason),
     partial: record.partial === true,
     current: typeof current === 'number' && Number.isFinite(current) ? current : null,
     total: typeof total === 'number' && Number.isFinite(total) ? total : steps.length,

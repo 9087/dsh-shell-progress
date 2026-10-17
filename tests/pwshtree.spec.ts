@@ -423,6 +423,9 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
     const plain = await shell(BROKEN_BUT_BALANCED)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
+    // The CARD's tooltip states this code (see `RefusalCode`): the host logs the English
+    // sentence, and the card itself must say the reason in the reader's language.
+    expect(result.progress.refusedReason).toBe('syntax-error')
     expect(result.progress.steps).toHaveLength(1)
     expect(result.progress.steps[0]?.text).toBe(BROKEN_BUT_BALANCED)
     expect(handed).toBe(BROKEN_BUT_BALANCED)

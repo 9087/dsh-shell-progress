@@ -1507,6 +1507,13 @@ test.describe('the shell_progress card in a real shell', () => {
     ).toBeVisible({ timeout: 10_000 })
     const untrackedNote = (await page.getByRole('tooltip').first().textContent()) ?? ''
     expect(untrackedNote.trim().length, 'the `!` explanation is empty').toBeGreaterThan(10)
+    // AND IT SAYS WHY. The fixture's refused command is a syntax error, so the tooltip names
+    // that reason — in the READER's language, which is why the host sends a code rather than
+    // the English sentence it logs.
+    expect(
+      untrackedNote,
+      `the \`!\` tooltip does not name the reason: ${untrackedNote}`,
+    ).toMatch(/语法错误|syntax error/)
     await refused.scrollIntoViewIfNeeded()
     await page.screenshot({ path: SHOT.replace('.png', '-refused.png') })
     console.log(`[e2e] refusal shot -> ${SHOT.replace('.png', '-refused.png')}`)

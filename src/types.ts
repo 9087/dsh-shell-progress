@@ -87,6 +87,27 @@ export interface StepProgress extends StepLine {
  * card — step lines, per-step output and per-step durations — from the log
  * alone.
  */
+/**
+ * Why a command was not instrumented, as a CODE rather than a sentence.
+ *
+ * The card shows the reason in the `!` tooltip, and the tooltip is written in the reader's
+ * language. A persisted sentence would come back in whichever language the writing host
+ * happened to use, so the wire carries the fact and the CLIENT owns the wording.
+ */
+export type RefusalCode =
+  | 'block-comment'
+  | 'here-string'
+  | 'line-continuation'
+  | 'unterminated-quote'
+  | 'unbalanced'
+  | 'syntax-error'
+  | 'no-answer'
+  | 'unsplittable'
+  | 'too-many-steps'
+  | 'already-instrumented'
+  | 'reserved-variable'
+  | 'read-only'
+
 export interface ShellProgressMeta {
   /** {@link META_VERSION} at the time of writing. */
   readonly v: number
@@ -105,6 +126,8 @@ export interface ShellProgressMeta {
    * and its card stays quiet.
    */
   readonly refused: boolean
+  /** Why it was refused, when it was — absent on a command that was instrumented. */
+  readonly refusedReason?: RefusalCode
   /** True when the consumed stream lost bytes, so attribution may be incomplete. */
   readonly partial: boolean
   /** Output produced before the first step's marker. Usually empty. */
@@ -130,6 +153,8 @@ export interface LiveSnapshot {
   readonly instrumented: boolean
   /** Whether instrumentation was refused — see {@link ShellProgressMeta.refused}. */
   readonly refused: boolean
+  /** Why it was refused, when it was — see {@link ShellProgressMeta.refusedReason}. */
+  readonly refusedReason: RefusalCode | null
   /** Whether the consumed stream lost bytes. */
   readonly partial: boolean
   /** Line number of the step executing now, or null before the first marker. */

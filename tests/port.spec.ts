@@ -17,6 +17,7 @@ const REFUSED = {
   running: false,
   instrumented: false,
   refused: true,
+  refusedReason: 'syntax-error',
   partial: false,
   current: null,
   total: 0,
@@ -29,9 +30,18 @@ describe('snapshotOf', () => {
   it('carries the refusal of a zero-step record through', () => {
     const snapshot = snapshotOf(REFUSED)
     expect(snapshot?.refused).toBe(true)
+    expect(snapshot?.refusedReason).toBe('syntax-error')
     expect(snapshot?.instrumented).toBe(false)
     expect(snapshot?.steps).toEqual([])
     expect(snapshot?.total).toBe(0)
+  })
+
+  it('drops a refusal reason this client has no wording for', () => {
+    // A newer host may add a code; guessing one would put a wrong sentence in the tooltip,
+    // and the generic sentence is what an absent code already covers.
+    expect(snapshotOf({ ...REFUSED, refusedReason: 'quantum-entanglement' })?.refusedReason).toBeNull()
+    expect(snapshotOf({ ...REFUSED, refusedReason: undefined })?.refusedReason).toBeNull()
+    expect(snapshotOf({ ...REFUSED, refusedReason: 3 })?.refusedReason).toBeNull()
   })
 
   it('reads anything but an explicit true as not refused', () => {

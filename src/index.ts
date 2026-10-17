@@ -54,7 +54,7 @@ import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
 import type { SplitResult, Step } from './split.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
-import type { LiveSnapshot, ShellProgressMeta } from './types.ts'
+import type { LiveSnapshot, RefusalCode, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
@@ -176,6 +176,8 @@ interface LiveEntry {
   readonly instrumented: boolean
   /** Whether instrumentation was refused; the client's "ran unmodified" signal. */
   readonly refused: boolean
+  /** Why it was refused, when it was; the card's tooltip states it. */
+  readonly refusedReason: RefusalCode | null
   /** Wall-clock ms the record was created, used only for eviction. */
   readonly createdAt: number
   settled: boolean
@@ -303,6 +305,9 @@ const OUTPUT_SCHEMA = {
         v: { type: 'integer', required: true },
         instrumented: { type: 'boolean', required: true },
         refused: { type: 'boolean', required: true },
+        // NOT required: a record persisted before this field existed still validates, and the
+        // card simply shows the generic sentence instead of a reason.
+        refusedReason: { type: 'string' },
         partial: { type: 'boolean', required: true },
         preamble: { type: 'string', required: true },
         steps: {
@@ -362,6 +367,31 @@ function refusalReason(
   if (reserved !== undefined && command.includes(reserved)) return `the command already uses ${reserved}`
   if (readOnly) return 'the sandbox mode is read-only'
   return undefined
+}
+
+/**
+ * Classify a refusal sentence into the code the card states.
+ *
+ * The splitter and the two planners each have their OWN wording for why they stopped; the
+ * card needs one member of a fixed set, because its tooltip is translated. Anything this
+ * classifier does not recognise becomes `unsplittable`: the generic sentence was the old
+ * answer, and an unrecognised reason must still say something true.
+ * @param reason - the refusal reason, as the host logged it.
+ * @returns the code for it.
+ */
+function refusalCode(reason: string): RefusalCode {
+  if (reason.startsWith('block comment')) return 'block-comment'
+  if (reason.startsWith('here-string')) return 'here-string'
+  if (reason.startsWith('line continuation')) return 'line-continuation'
+  if (reason.startsWith('unterminated')) return 'unterminated-quote'
+  if (reason.startsWith('unbalanced') || reason.startsWith('a closing brace') || reason.startsWith('a block is never closed')) return 'unbalanced'
+  if (reason.includes('syntax error')) return 'syntax-error'
+  if (reason.includes('did not answer')) return 'no-answer'
+  if (reason.startsWith('the command has more than')) return 'too-many-steps'
+  if (reason.startsWith('the command already contains')) return 'already-instrumented'
+  if (reason.startsWith('the command already uses')) return 'reserved-variable'
+  if (reason.startsWith('the sandbox mode is read-only')) return 'read-only'
+  return 'unsplittable'
 }
 
 /**
@@ -454,6 +484,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         running: false,
         instrumented: false,
         refused: false,
+        refusedReason: null,
         partial: false,
         current: null,
         total: 0,
@@ -467,6 +498,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       running: !entry.settled,
       instrumented: entry.instrumented,
       refused: entry.refused,
+      refusedReason: entry.refusedReason,
       partial: entry.lossy || entry.tracker.droppedOutput(),
       current: entry.tracker.current(),
       total: entry.steps.length,
@@ -551,6 +583,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         const split = await resolveSplit(dialect, args.command)
         const reason = refusalReason(dialect, args.command, split, readOnly, maxSteps)
         const instrumented = reason === undefined
+        // The reason itself is English and internal (it goes to the host log); the card gets a
+        // CODE so its tooltip can be written in the reader's language. See `RefusalCode`.
+        const refusal = reason === undefined ? undefined : { code: refusalCode(reason), detail: reason }
         // The client's explicit REFUSAL signal. A step count cannot carry it: a refusal is
         // not a guess about boundaries, it declines to decide them at all, so the card
         // would otherwise look like an ordinary one-step command.
@@ -592,6 +627,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           steps,
           instrumented,
           refused,
+          refusedReason: refused && refusal !== undefined ? refusal.code : null,
           createdAt: created,
           settled: false,
           lossy: false,
@@ -710,6 +746,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           v: META_VERSION,
           instrumented,
           refused,
+          ...refused && refusal !== undefined ? { refusedReason: refusal.code } : {},
           partial: lossy || entry.tracker.droppedOutput(),
           preamble: entry.tracker.preamble(),
           // The canonical value is validated against the output schema, which

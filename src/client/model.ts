@@ -29,7 +29,8 @@
  * @module dsh-shell-progress/client/model
  */
 
-import type { LiveSnapshot, ShellProgressMeta, StepProgress } from '../types.ts'
+import type { LiveSnapshot, RefusalCode, ShellProgressMeta, StepProgress } from '../types.ts'
+import { refusalCodeOf } from './port.ts'
 
 /** The tool arguments this plugin reads back off a call block. */
 export interface ToolArgs {
@@ -135,6 +136,8 @@ export interface ProgressView {
    * driven by: a refused command's step list is empty, so a count cannot say it.
    */
   readonly refused: boolean
+  /** Why it was refused, as a code the row translates; absent unless something was refused. */
+  readonly refusedReason?: RefusalCode
   /** True when some output could not be attributed. */
   readonly partial: boolean
   /** True while the command is still running. */
@@ -175,6 +178,7 @@ function assembleRows(
     readonly elapsedMs: number
     readonly instrumented: boolean
     readonly refused: boolean
+    readonly refusedReason?: RefusalCode
     readonly partial: boolean
     readonly preamble: string
     readonly failedIndex: number
@@ -214,6 +218,7 @@ function assembleRows(
     preamble: state.preamble,
     instrumented: state.instrumented,
     refused: state.refused,
+    ...state.refusedReason === undefined ? {} : { refusedReason: state.refusedReason },
     partial: state.partial,
     running: state.running,
     currentIndex: state.currentIndex,
@@ -262,6 +267,7 @@ export function viewFromSettled(
     elapsedMs: 0,
     instrumented: meta?.instrumented ?? false,
     refused: meta?.refused ?? false,
+    ...meta?.refusedReason === undefined ? {} : { refusedReason: meta.refusedReason },
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
     failedIndex: isError ? lastStarted : -1,
@@ -314,6 +320,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
     elapsedMs: live.elapsedMs,
     instrumented: live.instrumented,
     refused: live.refused,
+    ...live.refusedReason === null ? {} : { refusedReason: live.refusedReason },
     partial: live.partial,
     preamble: live.preamble,
     failedIndex: -1,
@@ -432,10 +439,15 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
     // the refusal, so the flag is what keeps an empty meta alive.
     if (record.refused !== true) return undefined
   }
+  // Narrowed, NOT dropped: a reloaded session must still say WHY the command was refused,
+  // and the code is what the card translates. A newer host's unknown code reads as no
+  // reason, which leaves the generic sentence in place.
+  const refusedReason = refusalCodeOf(record.refusedReason)
   return {
     v: typeof record.v === 'number' ? record.v : 0,
     instrumented: record.instrumented === true,
     refused: record.refused === true,
+    ...refusedReason === null ? {} : { refusedReason },
     partial: record.partial === true,
     preamble: typeof record.preamble === 'string' ? record.preamble : '',
     steps,
