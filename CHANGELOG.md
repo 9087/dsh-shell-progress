@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/9087/dsh-shell-progress/compare/v0.4.2...v0.5.0) (2026-10-17)
+
+### Features
+
+* **ui:** draw a refused command as one step, with a warning glyph ([ff1e14c](https://github.com/9087/dsh-shell-progress/commit/ff1e14ccb9c076ec80c3dbe892cced4ac0f3fcfd))
+* **ui:** say why a command was not split, in the warning's tooltip ([20d2d12](https://github.com/9087/dsh-shell-progress/commit/20d2d12a974d5925c17cb413c8ed724e5aafd57c))
+
+### Bug Fixes
+
+* **notes:** give the model a moment to answer before the card freezes ([8ebc93b](https://github.com/9087/dsh-shell-progress/commit/8ebc93bb4803cda58e5f9defa6a6a6ed4679c03a))
+* **notes:** one language per answer, and command strings verbatim ([c1847c7](https://github.com/9087/dsh-shell-progress/commit/c1847c71fdf4dbb87791356a777663bd6c9802de))
+* **ui:** start a refused card's command on the title's column ([b7a121f](https://github.com/9087/dsh-shell-progress/commit/b7a121fa8af5a60bec8c22b6f5b02482f24b75bf))
+
 ## [0.4.2](https://github.com/9087/dsh-shell-progress/compare/v0.4.1...v0.4.2) (2026-10-16)
 
 ### Bug Fixes
