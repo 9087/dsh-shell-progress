@@ -59,7 +59,7 @@ import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
 import { StepTracker } from './tracker.ts'
-import { requestStepNotes } from './llm-notes.ts'
+import { requestStepNotes, waitForNotes } from './llm-notes.ts'
 import type { LlmLike } from './llm-notes.ts'
 
 /** Stable Cordis plugin name. */
@@ -94,6 +94,17 @@ const notesConfig: { enabled: boolean; locale: string | undefined } = { enabled:
  * turning debug logging on.
  */
 const notesDiagnosed = new Set<string>()
+
+/**
+ * How long a FINISHED command may be held to collect notes that are still in flight.
+ *
+ * The card's metadata is frozen when the command ends, so a note that lands afterwards is
+ * invisible however good it is — and a one-second command finishes long before the model
+ * answers. The request went out beside the command, so this is a grace period rather than a
+ * wait for a request: two seconds covers a normal answer, and a slow or dead model costs a
+ * fast card no more than that.
+ */
+const NOTES_SETTLE_WAIT_MS = 2_000
 
 /**
  * Set the note preference pushed by the client.
@@ -603,6 +614,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         // it. Cancellation rides on `exec.signal`, so a run that ends takes its request with
         // it — and every failure is silent by construction (`requestStepNotes` answers
         // undefined), which is what keeps a convenience out of the card's correctness.
+        //
+        // The request IS awaited (bounded) once the command has finished — see
+        // `NOTES_SETTLE_WAIT_MS`: the card's metadata is frozen at that point, and a short
+        // command would otherwise lose the answer that is still on its way.
+        let notesSettle: Promise<unknown> | undefined
         if (notesConfig.enabled && steps.length > 0) {
           const route = notesRoute(exec)
           const locale = notesConfig.locale
@@ -627,7 +643,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               lines: steps.map((step) => step.text),
               signal: exec.signal,
             })
-            void notes.then((answer) => {
+            notesSettle = notes.then((answer) => {
               if (answer === undefined) {
                 complain('the model call produced no notes: a refusal, a timeout or an empty answer')
                 return
@@ -682,6 +698,13 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (refused && result.stderr.text.length > 0) {
           entry.tracker.observe({ kind: 'text', text: result.stderr.text })
         }
+
+        // THE CARD'S METADATA IS FROZEN HERE. A note still in flight has to land BEFORE this
+        // line or it is invisible forever — the client reads the settled record, not the live
+        // one — and a one-second command always ends before the model answers. The request
+        // went out with the command, so this normally returns at once; the budget is what
+        // keeps a slow or dead model from holding a fast card for longer.
+        if (notesSettle !== undefined) await waitForNotes(notesSettle, NOTES_SETTLE_WAIT_MS)
 
         const progress: ShellProgressMeta = {
           v: META_VERSION,

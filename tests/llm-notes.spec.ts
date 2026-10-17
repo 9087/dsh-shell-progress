@@ -7,7 +7,7 @@
  * cleaning up before it can be shown.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { MAX_NOTE_CHARS, parseNotes, requestStepNotes, type LlmLike } from '../src/llm-notes.ts'
+import { MAX_NOTE_CHARS, parseNotes, requestStepNotes, waitForNotes, type LlmLike } from '../src/llm-notes.ts'
 
 /** A service that streams the given chunks and records the request it was given. */
 function fakeLlm(chunks: readonly unknown[] | (() => AsyncIterable<unknown>)): {
@@ -145,3 +145,34 @@ describe('requestStepNotes', () => {
 interface StepNotesRequestShape {
   readonly lines: readonly string[]
 }
+
+describe('waitForNotes', () => {
+  it('returns as soon as the notes do', async () => {
+    let done = false
+    const work = Promise.resolve().then(() => { done = true })
+    await waitForNotes(work, 10_000)
+    expect(done, 'the wait did not take the answer it was given').toBe(true)
+  })
+
+  it('never waits longer than its budget', async () => {
+    // The card must not hang on a model that never answers: a run of 1s must cost ~1s,
+    // not the model's own 8s deadline.
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const work = new Promise<void>(() => {})
+      const waiting = waitForNotes(work, 2_000).then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(1_999)
+      expect(settled, 'the wait ended before its budget').toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await waiting
+      expect(settled, 'the budget did not end the wait').toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('swallows a failed request instead of failing the card', async () => {
+    await expect(waitForNotes(Promise.reject(new Error('boom')), 1_000)).resolves.toBeUndefined()
+  })
+})

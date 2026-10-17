@@ -196,3 +196,32 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
     request.signal?.removeEventListener('abort', abort)
   }
 }
+
+/**
+ * Wait for an in-flight notes request, but never longer than `budgetMs`.
+ *
+ * THE CARD'S METADATA IS FROZEN when the command ends, so a note that lands after that line
+ * is invisible however good it is — and a one-second command finishes long before the model
+ * answers. The request goes out beside the command and is normally back inside a longer run;
+ * this bounded grace is what keeps its notes when the run is shorter than the model is.
+ *
+ * A failure is not an error here: the caller's card is complete without notes, so the
+ * request's rejection is swallowed and the budget still bounds the wait.
+ *
+ * @param work - the request's continuation.
+ * @param budgetMs - the longest the card may be held past its end.
+ * @returns a promise that settles when the work does or the budget expires, whichever first.
+ */
+export async function waitForNotes(work: Promise<unknown>, budgetMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, budgetMs)
+    // The host has nothing else to do with this timer; it must not keep a process alive.
+    ;(timer as { unref?: () => void }).unref?.()
+  })
+  try {
+    await Promise.race([work.then(() => undefined).catch(() => undefined), deadline])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
