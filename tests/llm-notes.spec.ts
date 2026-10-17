@@ -57,6 +57,12 @@ describe('requestStepNotes', () => {
     expect(system, 'the length limit is not stated to the model').toContain(String(MAX_NOTE_CHARS))
     expect(system, 'the model is not told to stop restating the code it is annotating').toContain('Do NOT repeat or paraphrase the code')
     expect(system, 'the model is not told to number its answer').toContain('OWN number')
+    // ONE language for the whole answer. Asked merely to write "in" a language, an answer came
+    // back with its first line in English and the rest in Chinese — two annotators on one card.
+    expect(system, 'the model is not told to keep one language for the whole answer').toContain('Never answer some lines in one language')
+    // The command's own strings stay VERBATIM: a translated message stops matching the
+    // output the reader is looking at.
+    expect(system, 'the model is not told to keep the command\'s strings verbatim').toContain('untranslated')
   })
 
   it('hands the model the command lines themselves', async () => {

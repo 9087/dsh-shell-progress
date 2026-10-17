@@ -84,6 +84,13 @@ const MAX_ANSWER_TOKENS = 512
  * landing one step too late. Requiring each answer line to carry the command's own number
  * means an answer that does not line up loses THAT note instead of shifting the rest: a
  * missing note costs a convenience, a misattributed one lies about what a command does.
+ *
+ * TWO RULES THAT ARE ABOUT THE READER, not the model's style. (1) ONE language for the whole
+ * answer: asked merely to write "in" a language, an answer came back with its first line in
+ * English and the rest in Chinese, which reads as two different annotators. (2) The command's
+ * own strings stay VERBATIM — a printed message, a flag, a path — because a translated string
+ * no longer matches what the reader will see in the output. Naming both explicitly is the
+ * only way to get them consistently; the model otherwise treats them as a judgement call.
  * @param count - how many notes are wanted.
  * @param locale - the language the notes must be written in.
  * @returns the system prompt.
@@ -93,8 +100,11 @@ function systemPrompt(count: number, locale: string): string {
     'You annotate shell commands for a non-expert reader.',
     'The user sends numbered command lines. Answer with ONE line per command line, and start',
     'every answer line with that command line\'s OWN number followed by a colon, like "3: ...".',
-    `Write each note in the language identified by the BCP-47 tag "${locale}".`,
-    `Each note is at most ${String(MAX_NOTE_CHARS)} characters, plain language, no code, no markdown, no trailing period.`,
+    `Write EVERY note in the language identified by the BCP-47 tag "${locale}" — that one`,
+    'language for the whole answer. Never answer some lines in one language and the rest in another.',
+    'Keep the command\'s own text verbatim: its command names, flags, paths, identifiers and any',
+    'string it prints, matches or passes stay exactly as written in the command, untranslated.',
+    `Each note is at most ${String(MAX_NOTE_CHARS)} characters, plain language, no markdown, no trailing period.`,
     'Do NOT repeat or paraphrase the code: the reader can already see that line, so name what it',
     'ACCOMPLISHES instead. Do not open with the command name, a file name, or a phrase like "this line".',
     `Answer with the ${String(count)} numbered lines and NOTHING else: no preamble, no reasoning,`,
