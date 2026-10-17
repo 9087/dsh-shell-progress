@@ -86,17 +86,22 @@ const PROGRESS_META = {
  *
  * Four top-level steps, each ONE statement so that one line is one step (`& { … }` is
  * a script-block invocation, where `a; b` would be two statements and therefore two
- * steps). The first step is short and the rest are long, so that for twenty seconds
- * the card holds the shape the README figure wants: step 1 finished, step 2 in flight,
- * the last two still to come — a partly filled bar with a ticking clock, whatever the
- * spec's own timing turns out to be.
+ * steps).
+ *
+ * EVERY STEP IS REAL WORK. The figure is meant to look like a command somebody would
+ * actually run, so the four lines print a timestamp, count processes, measure the
+ * PowerShell install, and run a bounded computation — no `Start-Sleep` padding anywhere.
+ * The computation is also what keeps the card IN FLIGHT while the shutter opens, long
+ * enough that the picture shows a step with a ticking clock whatever the spec's own
+ * timing turns out to be. Nothing here reads the network or the session's working
+ * directory, so the figure depends on neither.
  */
 const LIVE_CALL = 'call-live-1'
 const LIVE_COMMAND = [
-  "& { Start-Sleep -Seconds 1; Write-Output '[1/4] fetch' }",
-  "& { Start-Sleep -Seconds 20; Write-Output '[2/4] build' }",
-  "& { Start-Sleep -Seconds 20; Write-Output '[3/4] test' }",
-  "& { Start-Sleep -Seconds 20; Write-Output '[4/4] pack' }",
+  "(Get-Date).ToString('MM-dd HH:mm:ss')",
+  '(Get-Process | Measure-Object).Count',
+  'Get-ChildItem -Path $PSHOME -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum',
+  '1..3000000 | ForEach-Object { $_ * 2 } | Measure-Object -Sum',
 ].join('\n')
 
 /**
@@ -143,12 +148,12 @@ const REFUSED_COMMAND = [
 
 /** Every live run this fixture keeps in flight, and the call id each one answers. */
 const LIVE_RUNS = [
-  { callId: LIVE_CALL, command: LIVE_COMMAND, description: 'four-step build demo' },
+  { callId: LIVE_CALL, command: LIVE_COMMAND, description: 'four-step environment check' },
   { callId: SOLE_CALL, command: SOLE_COMMAND, description: 'one-line command' },
   // The README's CHINESE figure. The card's title is the SHELL's own text — it follows
   // the language the host/browser resolves — while the summary after the separator is
   // this fixture's argument, so that half has to be published per language to match.
-  { callId: LIVE_CALL_ZH, command: LIVE_COMMAND, description: '四步构建演示' },
+  { callId: LIVE_CALL_ZH, command: LIVE_COMMAND, description: '四步环境体检' },
   // And the one whose output the budget truncates, for the count the card has to state.
   { callId: TRUNCATED_CALL, command: TRUNCATED_COMMAND, description: '输出很长的步骤' },
   // And the refused one, whose card must degrade to the plain shape.
@@ -295,7 +300,7 @@ export function apply(ctx) {
     step: 1,
     callId: LIVE_CALL,
     name: 'shell_progress_pwsh',
-    arguments: JSON.stringify({ command: LIVE_COMMAND, description: 'four-step build demo' }),
+    arguments: JSON.stringify({ command: LIVE_COMMAND, description: 'four-step environment check' }),
   })
 
   // ...and the single-LINE one, whose card is the case a one-step command used to get
@@ -315,7 +320,7 @@ export function apply(ctx) {
     step: 1,
     callId: LIVE_CALL_ZH,
     name: 'shell_progress_pwsh',
-    arguments: JSON.stringify({ command: LIVE_COMMAND, description: '四步构建演示' }),
+    arguments: JSON.stringify({ command: LIVE_COMMAND, description: '四步环境体检' }),
   })
 
   // ...and one whose step prints far past the per-step output budget, so the card has to

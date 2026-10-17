@@ -102,6 +102,18 @@ const README_SHOT = join(repoRoot, 'docs', 'assets', 'running.png')
 const README_SHOT_ZH = join(repoRoot, 'docs', 'assets', 'running.zh.png')
 
 /**
+ * The second committed pair: the card a segment opens on hover, one per language.
+ *
+ * It cannot be `card.screenshot()`: the hover card is a PORTAL — a `position: fixed`
+ * child of `body`, not of the call row — so clipping to the card would cut off the very
+ * thing the picture is about. The shot therefore clips to the UNION of the card's box and
+ * the portal's box, which is what the README shows side by side: the bar, the step list,
+ * and the card the pointer opened.
+ */
+const README_HOVER_SHOT = join(repoRoot, 'docs', 'assets', 'hover.png')
+const README_HOVER_SHOT_ZH = join(repoRoot, 'docs', 'assets', 'hover.zh.png')
+
+/**
  * The viewport BOTH figures are taken at — narrower than the suite's own 1400px.
  *
  * A figure is CROPPED TO THE CARD, so its width is the transcript column's, and the
@@ -904,19 +916,24 @@ test.describe('the shell_progress card in a real shell', () => {
           command: node.querySelector('[data-card-command]')?.textContent ?? null,
           note: node.querySelector('[data-card-note]')?.textContent ?? null,
         })))
-      await steps.nth(2).hover()
-      await page.waitForTimeout(250)
-      // The PREVIOUS card can still be in the DOM while the new one opens, so this picks
-      // the card that belongs to the hovered step instead of trusting DOM order.
-      const cards = await openCards()
-      const bare = cards.find((entry) => (entry.command ?? '').includes('[3/4] test'))
-      expect(bare, `hovering the third segment opened no card for it; open cards: ${JSON.stringify(cards)}`).toBeDefined()
+      /**
+       * Hover one step and answer its card once the shell has opened it.
+       *
+       * POLLED, not sampled after a sleep: the hover card is portaled and animated, and the
+       * previous one can still be in the DOM while the next opens, so a single read after a
+       * fixed delay is a race — it passed three runs and then failed once.
+       */
+      const cardFor = async (segment: import('@playwright/test').Locator, needle: string) => {
+        await segment.hover()
+        await expect
+          .poll(async () => (await openCards()).some((entry) => (entry.command ?? '').includes(needle)), { timeout: 5_000 })
+          .toBe(true)
+        return (await openCards()).find((entry) => (entry.command ?? '').includes(needle))
+      }
+      const bare = await cardFor(steps.nth(2), '[3/4] test')
       expect(bare?.note, 'a step with no note drew one anyway').toBeNull()
       // ...and the pointer goes BACK, so every measurement below sees the card it saw.
-      await steps.first().hover()
-      await page.waitForTimeout(250)
-      const back = (await openCards()).find((entry) => (entry.command ?? '').includes('[1/4] fetch'))
-      expect(back, 'the first segment\'s card did not come back').toBeDefined()
+      const back = await cardFor(steps.first(), '[1/4] fetch')
       expect(back?.note, 'the note is gone after the pointer returned').not.toBeNull()
     }
     // AND SYNTAX HIGHLIGHTING DOES REACH IT: the command line carries token spans, which
@@ -1222,14 +1239,15 @@ test.describe('the shell_progress card in a real shell', () => {
     console.log(`[e2e] live probe ${JSON.stringify(liveProbe)}`)
     console.log(`[e2e] host log tail ${JSON.stringify(tail(host.logFile).slice(-1200))}`)
     // Deterministic despite the run's own timing: this waits for the SHAPE the figure
-    // documents — the first step finished, the second in flight — rather than for a
-    // duration. The fixture's command holds that shape for twenty seconds (see
-    // `seed-session.mjs`), and the run is a single one, because the client stops
-    // polling a call as soon as an answer says it is no longer running.
+    // documents — something finished, one step in flight, the rest still to come — rather
+    // than for a duration. "At least one" finished, not exactly one: the fixture's steps
+    // are REAL work, so the first two finish in milliseconds and an exact count would be a
+    // race against the run. The LAST step is the long one (see `seed-session.mjs`), and it
+    // is what keeps the run in flight while the shutter opens.
     await expect(
-      live.locator('[role="progressbar"] [data-phase="done"]'),
+      live.locator('[role="progressbar"] [data-phase="done"]').first(),
       'the live card never finished its first step',
-    ).toHaveCount(1, { timeout: 60_000 })
+    ).toBeVisible({ timeout: 60_000 })
     await expect(
       live.locator('[role="progressbar"] [data-phase="running"]'),
       'the live card never showed a step in flight',
@@ -1254,7 +1272,7 @@ test.describe('the shell_progress card in a real shell', () => {
     expect(liveState.phases.filter((phase) => phase === 'running')).toHaveLength(1)
     // The opened card carries each step's OWN command line, the finished ones included,
     // and the clock of the step in flight.
-    expect(liveState.text, 'the live card does not show its steps').toContain('[1/4] fetch')
+    expect(liveState.text, 'the live card does not show its steps').toContain('(Get-Date)')
     expect(liveState.clocks.filter((clock) => clock !== null).length, 'no step carries a clock').toBeGreaterThanOrEqual(1)
     // A step that has NOT run yet keeps its command line at full strength, exactly like
     // the finished ones: this card holds done, running AND pending rows at once, so the
@@ -1287,11 +1305,13 @@ test.describe('the shell_progress card in a real shell', () => {
     // browser: the fixture's home writes `locale.preference: zh` (see `makeFixture`), and
     // that STORED preference replaces the client's provisional browser-derived language
     // once the plugin activates — which is why an `en-US` context produced an English
-    // title on one run and a Chinese one on the next. So the English figure gets a second
-    // home that says `en`: one boot, and the language becomes an input of this test
-    // instead of a race. The Chinese figure comes from the suite's own host, whose home
-    // already says zh. The fixture publishes one live call per language, so the summary
-    // after the separator matches the title above it. (`running.png` is the English one,
+    // title on one run and a Chinese one on the next. So EACH figure gets a home of its
+    // own that says its language: one boot, and the language becomes an input of this test
+    // instead of a race. Each also gets a HOST of its own, because the figure is a
+    // photograph of a LIVE run and the demo command is real work that finishes in seconds:
+    // shot against the suite's long-lived host, the Chinese figure would find that run
+    // already over. The fixture publishes one live call per language, so the summary after
+    // the separator matches the title above it. (`running.png` is the English one,
     // `running.zh.png` the Chinese.)
     // ---------------------------------------------------------------------------
     const englishFixture = makeFixture('figure-en', 'en')
@@ -1305,7 +1325,7 @@ test.describe('the shell_progress card in a real shell', () => {
         const englishSession = await waitForMarker(englishHost.logFile, MARKER, 60_000)
         expect(englishSession, `the English fixture never announced its session:\n${tail(englishHost.logFile)}`).toBe(SESSION_ID)
         const english = await captureFigure(
-          browser, englishHost.url, englishSession!, 'en-US', LIVE_CALL, README_SHOT,
+          browser, englishHost.url, englishSession!, 'en-US', LIVE_CALL, README_SHOT, README_HOVER_SHOT,
           'Run a command with shell_progress_pwsh',
         )
         console.log(`[e2e] figure en ${JSON.stringify(english)}`)
@@ -1315,11 +1335,27 @@ test.describe('the shell_progress card in a real shell', () => {
     } finally {
       englishFixture.cleanup()
     }
-    const chinese = await captureFigure(
-      browser, host.url, sessionId, 'zh-CN', LIVE_CALL_ZH, README_SHOT_ZH,
-      '使用 shell_progress_pwsh 运行命令',
-    )
-    console.log(`[e2e] figure zh ${JSON.stringify(chinese)}`)
+    const chineseFixture = makeFixture('figure-zh', 'zh')
+    try {
+      await bootstrapHome(dsh!, chineseFixture)
+      const chineseHost = await startHost(dsh!, chineseFixture.home, chineseFixture.workspace, chineseFixture.logFile, [
+        '--patch',
+        join(repoRoot, 'e2e', 'fixtures', 'profile.patch.yml'),
+      ])
+      try {
+        const chineseSession = await waitForMarker(chineseHost.logFile, MARKER, 60_000)
+        expect(chineseSession, `the Chinese fixture never announced its session:\n${tail(chineseHost.logFile)}`).toBe(SESSION_ID)
+        const chinese = await captureFigure(
+          browser, chineseHost.url, chineseSession!, 'zh-CN', LIVE_CALL_ZH, README_SHOT_ZH, README_HOVER_SHOT_ZH,
+          '使用 shell_progress_pwsh 运行命令',
+        )
+        console.log(`[e2e] figure zh ${JSON.stringify(chinese)}`)
+      } finally {
+        await stopHost(chineseHost.proc)
+      }
+    } finally {
+      chineseFixture.cleanup()
+    }
 
     // ---------------------------------------------------------------------------
     // ONE LINE, ONE SEGMENT. A single-line command is not instrumented — there is no
@@ -1472,6 +1508,7 @@ async function captureFigure(
   locale: string,
   callId: string,
   path: string,
+  hoverPath: string,
   titleText: string,
 ): Promise<{ readonly title: string; readonly width: number }> {
   const context = await browser.newContext({ locale, viewport: { width: README_FIGURE_WIDTH, height: 900 } })
@@ -1499,6 +1536,26 @@ async function captureFigure(
     await expect(card, `${callId}'s card never took its ${titleText} title`).toContainText(titleText, { timeout: 30_000 })
     mkdirSync(dirname(path), { recursive: true })
     await card.screenshot({ path, animations: 'disabled' })
+    // The hover card, same moment, same context: a UNION crop, because the card is
+    // portaled out of the row (see `README_HOVER_SHOT`) and `card.screenshot` would clip
+    // the tooltip away entirely.
+    await card.locator('[role="progressbar"] [data-phase]').first().hover({ timeout: 10_000 })
+    const portal = page.locator('body > div:has(> [data-step-card])').first()
+    await expect(portal, `${callId}'s segment opened no hover card`).toBeVisible({ timeout: 10_000 })
+    const cardBox = await card.boundingBox()
+    const portalBox = await portal.boundingBox()
+    if (cardBox === null || portalBox === null) throw new Error(`${callId}: the hover shot has no box to crop to`)
+    const pad = 8
+    const left = Math.max(0, Math.min(cardBox.x, portalBox.x) - pad)
+    const top = Math.max(0, Math.min(cardBox.y, portalBox.y) - pad)
+    const right = Math.max(cardBox.x + cardBox.width, portalBox.x + portalBox.width) + pad
+    const bottom = Math.max(cardBox.y + cardBox.height, portalBox.y + portalBox.height) + pad
+    mkdirSync(dirname(hoverPath), { recursive: true })
+    await page.screenshot({
+      path: hoverPath,
+      clip: { x: left, y: top, width: right - left, height: bottom - top },
+      animations: 'disabled',
+    })
     const box = await card.boundingBox()
     return { title: (await card.textContent()) ?? '', width: box?.width ?? -1 }
   } finally {
