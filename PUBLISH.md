@@ -11,8 +11,9 @@ pnpm run release
 `before:bump` hook (`pnpm run build && pnpm test`), writes `CHANGELOG.md`,
 commits `chore: release vX.Y.Z`, tags `vX.Y.Z`, and pushes both.
 
-The push of the tag starts `.github/workflows/release.yml`, which runs the unit
-suite, builds, and publishes with `npm publish --provenance`.
+The push of the tag starts `.github/workflows/release.yml`, which runs the same
+gate, publishes with `npm publish --provenance` through Trusted Publishing (OIDC —
+no token), and creates a GitHub Release.
 
 ## What a human must do once
 

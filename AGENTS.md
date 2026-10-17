@@ -23,15 +23,15 @@ Change a source file with the `edit`/`write` tools. A round trip through
 that is how a UTF-8 file ends up with `?` where an em dash was, and how a
 newline gets glued onto the wrong line.
 
-## A UI change refreshes both README figures
+## A UI change refreshes all four README figures
 
-`docs/assets/running.png` (English, used by `README.md`) and
-`docs/assets/running.zh.png` (Chinese, used by `README.zh.md`) are committed
-photographs of the card, produced by `pnpm run e2e`. So a change to what the card
-LOOKS like is not finished until the suite has been re-run and both images
-committed. Nothing else checks them: a stale pair goes on making a claim about the
-UI that stopped being true, while the build, the type checker and every test stay
-green.
+`docs/assets/running.png` and `docs/assets/hover.png` (English, used by `README.md`),
+and `docs/assets/running.zh.png` and `docs/assets/hover.zh.png` (Chinese, used by
+`README.zh.md`) are committed photographs produced by `pnpm run e2e`: the card while a
+command runs, and the hover card a segment opens. So a change to what the card LOOKS
+like is not finished until the suite has been re-run and all four images committed.
+Nothing else checks them: a stale set goes on making claims about the UI that stopped
+being true, while the build, the type checker and every test stay green.
 
 Each figure is shot against its own host. The card's title is the SHELL's own text,
 and the language comes from that host's stored `locale.preference`

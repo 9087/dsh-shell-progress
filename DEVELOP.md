@@ -10,6 +10,13 @@
 `src/types.ts` and `src/split.ts` are shared by both halves and must stay free
 of Node and DOM imports.
 
+**The live channel is a poll, not a push.** A plugin installed outside the DSH
+tree cannot receive host events — the forwarded-event allowlist is a static array
+inside the DSH build — so the browser polls `/shell-progress` (an authenticated
+request/response channel this plugin owns) every 250ms — the store's default
+cadence — while a call is in flight. The settled state never needs the poll: it is
+already in the session log.
+
 ## Commands
 
 ```sh
@@ -40,6 +47,21 @@ the published tarball is still only ~150 kB compressed.
 Do NOT "fix" the size by externalising shiki: the table cannot answer
 `require('shiki')`, so that is a guaranteed runtime throw (see the rule above),
 not a smaller bundle.
+
+## Workflows
+
+The three badges at the top of both READMEs are these, and each answers a
+different question — they are not three flavours of the same check:
+
+| Workflow | What it does |
+|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | Typechecks, builds and runs the unit suite against the harness version pinned in `devDependencies` — ONE host version, the one this repository declares. |
+| [`harness-matrix.yml`](.github/workflows/harness-matrix.yml) | Re-runs the three suites that cross the plugin/host seam (the registered tool driven through `apply`, the pwsh planner, the bash planner) once per published harness version — the only real answer to "will this still work after the host upgrades". A version inside the declared peer range blocks the build; the newest published version rides along as a non-blocking probe. |
+| [`release.yml`](.github/workflows/release.yml) | On a `v*` tag: the same gate, then `npm publish --provenance` through Trusted Publishing (OIDC — no token anywhere), then a GitHub Release. Its publishing side is [`PUBLISH.md`](PUBLISH.md). |
+
+The first two badges point at `main`; the release badge is pinned to a tag,
+because a tag-triggered workflow has no status on a branch (a branch badge renders
+"no status"). `?branch=` in both READMEs must be bumped with each release.
 
 ## The development loop
 
@@ -72,6 +94,43 @@ build on any `@deepseek-ai/*` *value* import that is not a platform module
 (`build/platform.ts`), an inline-safe wire layer, or a generated `/remote`
 contribution. Cross-plugin collaboration goes through cordis services, and
 type-only imports are erased and always fine.
+
+## How it works
+
+1. **Split.** The command is cut into *top-level steps*: non-empty lines that
+   start at column 0, do not start with `}`, and sit at brace depth 0. Brace
+   counting skips single-quoted strings, double-quoted strings (with the
+   backtick escape) and `#` comments. Loop bodies are never steps, so one
+   iteration cannot produce a marker.
+2. **Instrument.** Each step's own line gets an inlined marker prefixed to it —
+   never a new line, so the line count and every other line stay untouched.
+3. **Run.** The instrumented text goes through `ctx.shell`, exactly as the
+   `pwsh` tool runs a command, with the same timeout, sandbox policy, managed
+   environment and cancellation.
+4. **Follow.** While the process runs, the host reads its incremental output and
+   turns each marker into "the current step", stamping a monotonic timestamp.
+5. **Persist.** The final per-step timings and output ride
+   `output.presentationMeta`, so a reloaded session rebuilds the whole card from
+   the session log alone.
+
+### The marker must stay inlined
+
+`src/instrument.ts` carries the long version; the short one is that a PowerShell
+function call is itself a command, and running it overwrites `$?`. A marker
+written as a helper therefore clobbers the automatic variable it was asked to
+preserve — and the caller's `$?` afterwards reports the *helper's* success, so
+even a helper that captures and restores the value internally cannot fix it.
+Measured on this host (Windows PowerShell 5.1, which is what the shell seam
+resolves to when PowerShell 7 is not installed):
+
+| Marker shape | `$?` after a failed command |
+|---|---|
+| none (control) | `False` ✅ |
+| helper function, capture + restore inside | `True` ❌ |
+| **inlined capture + restore** | `False` ✅ |
+
+`tests/powershell.spec.ts` runs both shapes against a real shell and asserts the
+difference, so a future refactor into a helper fails the suite.
 
 ## Testing
 
@@ -126,18 +185,25 @@ look like the shell's own row?" is a question about pixels, and two real bugs �
 bar collapsed to zero width and a chevron on the wrong side — were invisible to
 every unit test and obvious in one screenshot.
 
-### The two committed figures, and the duty that comes with them
+### The four committed figures, and the duty that comes with them
 
-The same run also writes the only images the repository tracks, each CROPPED to the
-card itself:
+The same run also writes the only images the repository tracks — the card itself, and the
+card a segment opens on hover:
 
 | File | Language | Shown by |
 |---|---|---|
 | `docs/assets/running.png` | English | `README.md` |
 | `docs/assets/running.zh.png` | Chinese | `README.zh.md` |
+| `docs/assets/hover.png` | English | `README.md` |
+| `docs/assets/hover.zh.png` | Chinese | `README.zh.md` |
 
-**A UI change is not finished until both are regenerated**: run `pnpm run e2e` and
-commit the two images it rewrites. They are photographs, so a stale pair keeps
+The two `running` figures are CROPPED TO THE CARD. The two `hover` figures are cropped to
+the UNION of the card and the hover card, because the hover card is a portal — a clip to
+the call row would cut off the very thing the picture is about (`captureFigure` says so in
+the code).
+
+**A UI change is not finished until all four are regenerated**: run `pnpm run e2e` and
+commit the four images it rewrites. They are photographs, so a stale set keeps
 asserting something about the card that stopped being true — and nothing catches it:
 the build, the type checker and every test stay green while both READMEs display the
 old pixels.
