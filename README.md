@@ -5,13 +5,13 @@ English | [中文](https://github.com/9087/dsh-shell-progress/blob/main/README.z
 <!-- Badges. `ci.yml` and `harness-matrix.yml` both run on `main`, so their badges
      track it. `release.yml` is TAG-triggered and has no status on a branch — a
      branch badge for it renders "no status" — so its badge is pinned to a tag and
-     `?branch=v0.4.2` below must be bumped with each release. -->
+     `?branch=v0.5.0` below must be bumped with each release. -->
 [![npm](https://img.shields.io/npm/v/dsh-shell-progress)](https://www.npmjs.com/package/dsh-shell-progress)
 [![license](https://img.shields.io/npm/l/dsh-shell-progress)](https://github.com/9087/dsh-shell-progress/blob/main/LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.11-339933)](https://github.com/9087/dsh-shell-progress/blob/main/package.json)
 [![ci](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/ci.yml)
 [![harness matrix](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml/badge.svg?branch=main)](https://github.com/9087/dsh-shell-progress/actions/workflows/harness-matrix.yml)
-[![release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.4.2)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
+[![release](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml/badge.svg?branch=v0.5.0)](https://github.com/9087/dsh-shell-progress/actions/workflows/release.yml)
 
 A DeepSeek Harness plugin that shows **where a multi-step shell command is right
 now**, as a segmented progress bar inside the tool-call card.
