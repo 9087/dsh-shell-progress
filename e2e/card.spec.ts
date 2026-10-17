@@ -1452,6 +1452,10 @@ test.describe('the shell_progress card in a real shell', () => {
     ).toBeAttached({ timeout: 60_000 })
     const refusal = await refused.evaluate((node) => {
       const body = node.querySelector('[data-plain-body="true"]')
+      const cardLeft = node.getBoundingClientRect().left
+      const left = (element: Element | null | undefined): number | null =>
+        element === null || element === undefined ? null : element.getBoundingClientRect().left - cardLeft
+      const header = node.querySelector('[data-disclosure-row]')
       return {
         command: body?.querySelector('[data-code="true"]')?.textContent ?? null,
         output: body?.querySelector('[data-output="true"]')?.textContent ?? null,
@@ -1459,6 +1463,10 @@ test.describe('the shell_progress card in a real shell', () => {
         counters: node.querySelectorAll('[data-counter="true"]').length,
         rows: node.querySelectorAll('[data-phase]').length,
         dots: body?.querySelectorAll('[data-dot="true"]').length ?? -1,
+        markers: body?.querySelectorAll('[data-marker="true"]').length ?? -1,
+        commandLeft: left(body?.querySelector('[data-code="true"]')),
+        outputLeft: left(body?.querySelector('[data-output="true"]')),
+        titleLeft: left(header?.lastElementChild),
       }
     })
     console.log(`[e2e] refusal ${JSON.stringify(refusal)}`)
@@ -1470,6 +1478,21 @@ test.describe('the shell_progress card in a real shell', () => {
     expect(refusal.counters, 'a refused card drew a counter').toBe(0)
     expect(refusal.rows, 'a refused card drew step rows').toBe(0)
     expect(refusal.dots, 'a refused card drew a step dot').toBe(0)
+    // AND NO MARKER COLUMN. A refused card is not a step: there is no dot to put in the
+    // column, so reserving it would only hold the command to the right of the title it
+    // belongs to. The command therefore starts on the TITLE's own column — the shell's
+    // 16px leading slot plus its 6px gap, which the progress line and the header share —
+    // and the output starts on that same column rather than under a dot it does not have.
+    expect(refusal.markers, 'a refused card kept the step list\'s marker column').toBe(0)
+    const titleOffset = (refusal.commandLeft ?? -1) - (refusal.titleLeft ?? -2)
+    expect(
+      Math.abs(titleOffset),
+      `the plain command starts at ${refusal.commandLeft}px, the title at ${refusal.titleLeft}px: not one column`,
+    ).toBeLessThanOrEqual(1)
+    expect(
+      Math.abs((refusal.outputLeft ?? -1) - (refusal.commandLeft ?? -2)),
+      `the plain output starts at ${refusal.outputLeft}px, its command at ${refusal.commandLeft}px`,
+    ).toBeLessThanOrEqual(1)
     // The plain body in view, for the human check.
     await refused.locator('[data-plain-body="true"]').scrollIntoViewIfNeeded()
     await page.screenshot({ path: SHOT.replace('.png', '-refused.png') })

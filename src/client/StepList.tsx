@@ -213,12 +213,17 @@ export function PlainBody({ command, output, toolName, outputLabel }: {
     <div className={styles.list} data-plain-body="true">
       <div className={styles.row}>
         <div className={styles.headline} data-headline="true">
-          {/* Empty on purpose: the column, not a dot. See the note above. */}
-          <span className={styles.marker} data-marker="true" aria-hidden="true" />
+          {/* NO marker column here, on purpose. A step row keeps one so the dot has
+              somewhere to live and every command line shares a column; this card is not a
+              step — nothing was marked, nothing has a state — so an empty 8px column would
+              only hold the command a dot's width to the RIGHT of the title it belongs to.
+              Without it the command starts on the title's own column: `.steps` supplies
+              21px and the headline's 1px makes the 22px the header and the progress line
+              share (see `Row.module.css`). */}
           <div className={styles.code} data-code="true">{commandContent(command, toolName)}</div>
         </div>
         {output.trim() === '' ? null : (
-          <pre className={styles.output} data-output="true" aria-label={outputLabel}>{output}</pre>
+          <pre className={styles.plainOutput} data-output="true" aria-label={outputLabel}>{output}</pre>
         )}
       </div>
     </div>

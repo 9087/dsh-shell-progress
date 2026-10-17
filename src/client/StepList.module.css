@@ -251,6 +251,15 @@
 }
 
 
+/* The plain body's output, under the plain command. It keeps the `.output` face (dimmer,
+ * same font) but NOT its indent: a step row's output indents past the marker column so it
+ * lines up with the command text beside the dot, and this body has no marker column at all
+ * (see `PlainBody`), so that indent would push the output 15px right of the command it
+ * belongs to. Zero instead: output starts on the command's own column. */
+.plainOutput {
+  padding-left: 0;
+}
+
 /* The cut, stated AT the cut. Dimmer than the output it follows — it is a note ABOUT
  * that output, not output — and on the command text's own column, like the block above
  * it. Without it a step whose output the budget truncated is indistinguishable from a
