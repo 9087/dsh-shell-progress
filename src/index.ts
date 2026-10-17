@@ -540,21 +540,24 @@ export function apply(ctx: Context, config: Config = {}): void {
         const split = await resolveSplit(dialect, args.command)
         const reason = refusalReason(dialect, args.command, split, readOnly, maxSteps)
         const instrumented = reason === undefined
-        // The client's explicit REFUSAL signal. A step count cannot carry it: a
-        // refusal is not a guess, so it plans NO steps, and a zero-step refused
-        // card would otherwise look exactly like a command with nothing to show
-        // and lose its notice. The one uninstrumented case that is not a refusal
-        // is "there was no boundary to decide" (a single safe step), which is
-        // what keeps the card quiet for an ordinary single-line command.
+        // The client's explicit REFUSAL signal. A step count cannot carry it: a refusal is
+        // not a guess about boundaries, it declines to decide them at all, so the card
+        // would otherwise look like an ordinary one-step command.
         const refused = reason !== undefined && !(split.safe && split.steps.length <= 1)
-        // A REFUSAL REPORTS NO STEPS. The planner hands back a best-effort list even when it
-        // reports a syntax error, and rendering that list was a lie: the command ran WITHOUT
-        // markers, so those rows could only ever read "pending" — no timing, no output of
-        // their own — while everything the command actually printed sat in the preamble under
-        // a label about a "first step" that never existed. `refused` is the answer; the steps
-        // are the guess it declined to trust. Reporting none also makes the client's own
-        // assumption true again (see `model.ts`: an empty list plus the flag IS the refusal).
-        const steps = refused ? [] : split.steps
+        // A REFUSED COMMAND IS STILL ONE COMMAND, so it is reported as ONE step whose text
+        // is the whole command: the card then draws exactly what a one-line command draws —
+        // one segment, one row, one hover card — with the host's own start and end stamped
+        // on it, and `refused` is the extra bit the client renders as the title's `!`.
+        //
+        // Reporting NO steps instead is what made a refusal a separate, plainer card, and
+        // reporting the planner's best-effort list was worse: that list is a lie, because
+        // the command ran without markers, so its rows could only ever read "pending"
+        // while everything the command printed sat in the preamble under a label about a
+        // "first step" that never existed. One step cannot lie that way — it IS the
+        // command — and its output is budgeted like any other step's.
+        const steps: readonly Step[] = refused
+          ? [{ line: 1, text: args.command }]
+          : split.steps
         // `warn`, not `debug`: the card no longer says anything about tracking — a refused
         // call shows its command and its output, nothing more — so this line is the only
         // place the REASON is stated, and it has to be visible without debug logging on.
@@ -671,12 +674,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         const result = await execution.result()
         if (result.aborted) throw toolAborted()
 
-        // A refused run's card is the PLAIN one: the command, then everything it produced.
-        // What it can draw comes from the tracker, and the tracker only ever saw STDOUT —
-        // while the commonest refusal of all, a syntax error, prints its message on STDERR
-        // and nothing on stdout. Without this, exactly the case the plain card exists for
-        // would render an empty body. The model's own view is untouched: `result` is returned
-        // below as it always was, and this feeds the CARD.
+        // A refused run's ONE step gets the same treatment: what it can draw comes from the
+        // tracker, and the tracker only ever saw STDOUT — while the commonest refusal of
+        // all, a syntax error, prints its message on STDERR and nothing on stdout. Without
+        // this the step would render an empty output. The model's own view is untouched:
+        // `result` is returned below as it always was, and this feeds the CARD.
         if (refused && result.stderr.text.length > 0) {
           entry.tracker.observe({ kind: 'text', text: result.stderr.text })
         }

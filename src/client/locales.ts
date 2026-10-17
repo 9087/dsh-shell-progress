@@ -17,6 +17,7 @@ export const en = {
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds}s',
   'row.partial': 'Some output could not be shown in full.',
+  'row.untracked': 'This command was not split, so the bar covers the whole command.',
   /*
    * Says what the CUT cost, at the cut: the per-step output budget discards whole
    * lines, and without this a truncated step is indistinguishable from a quiet one.
@@ -59,6 +60,7 @@ export const zh: Record<keyof typeof en, string> = {
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds} 秒',
   'row.partial': '部分输出未能完整显示。',
+  'row.untracked': '这条命令没有被切分，进度只代表整条命令。',
   // 英文原样，故意不翻译：见英文键旁的说明。shell 自己的省略措辞就是英文的
   //（`describeOmitted`：`Omitted N chars.`），它本地化的只是行的标签。
   'row.truncated': '… Omitted {chars} chars.',

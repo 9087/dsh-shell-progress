@@ -453,7 +453,10 @@ describe('the tool path instruments from the plan, not the heuristics refusal', 
     const { result, handed } = await throughTool(BROKEN_IF)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
-    expect(result.progress.steps).toEqual([])
+    // ONE step, the whole command: a refusal never reports the planner's rows, but the
+    // command is real and the card draws it as a single segment.
+    expect(result.progress.steps).toHaveLength(1)
+    expect(result.progress.steps[0]?.text).toBe(BROKEN_IF)
     expect(handed).toBe(BROKEN_IF)
     expect(handed).not.toContain(MARKER_PREFIX)
   })

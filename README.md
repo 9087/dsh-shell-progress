@@ -34,7 +34,7 @@ In the hover card, each step gets a one-line comment above its command line, spe
 
 Expanding the card shows the command's steps, one row each: the line's command, plus its time and output; the step in flight carries a running clock.
 
-A command that cannot be split, or that the plugin declines to track, falls back to the plain card: the command and all its output, with no bar, and the command behaving exactly as it does under the `pwsh` tool.
+A command that cannot be split, or that the plugin declines to track, is still ONE command: the card draws one segment, and a `!` after the title explains on hover that the command was not split, so the bar describes the whole command rather than per-step progress. The command itself runs exactly as it does under the `pwsh` tool, and its output obeys the same per-step budget.
 
 ## Install
 

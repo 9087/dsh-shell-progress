@@ -121,12 +121,56 @@
   font-size: var(--dsh-content-font-size-secondary, 13px);
 }
 
+/* The marker's wrapper. It exists so the "this was not tracked" claim is on a plain element
+ * (see `UntrackedMark`), and it must not add a box of its own to the header: an inline-flex
+ * at the glyph's size, centred like the glyph. */
+.untrackedAnchor {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The `⚠` on a card whose command was NOT tracked. It rides in the header's INLINE slot
+ * because `DisclosureRow`'s title is a string, so it lands immediately after the title,
+ * ahead of the separator and the summary — where the reader looks first.
+ *
+ * The warning TRIANGLE, at the system's warning AMBER: the header is 24px of quiet type and
+ * this is the one mark in it, so it is a glyph rather than a badge — a bordered box beside
+ * the title read as a control. Amber, not red, because a refusal is not an error: the
+ * command ran, unmodified.
+ *
+ * `align-self: center` is what puts it on the title's axis: the header's text is a flex row,
+ * and the glyph's own box is shorter than the title's line, so without it the mark rides
+ * high. `line-height: 1` then keeps that box tight around the character, and the cursor is
+ * the HAND: the glyph opens an explanation, so it reads as something to point at. */
+.untracked {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 1em;
+  margin-left: 4px;
+  /* The triangle's INK sits high inside its em box — the character is drawn from the box's
+   * top rather than centred in it — so a centred box puts the visible mark a pixel above the
+   * title's optical centre. `top` moves the paint down without touching the box, so nothing
+   * around it shifts. */
+  position: relative;
+  top: 1px;
+  color: var(--dsw-alias-state-warn-primary, #f59e0b);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
 /* Indented to the title, clear of the leading glyph: the shell's own leading
  * slot is `calc(16px + delta)` wide plus a 6px gap. Its RIGHT inset is the
  * shared `--card-pad-right`, the same one the step list uses, so the counter that
  * ENDS this row — the bar's count, now to the right of the bar — ends where the
- * step rows end. */
-/* The row's box is EXACTLY as tall as the bar it draws — 9px, the track's own height —
+ * step rows end. *//* The row's box is EXACTLY as tall as the bar it draws — 9px, the track's own height —
  * and it must stay that way. The shell allots a collapsed card its own title row plus
  * this row, and its body is a scroll container (`overflow-y: auto` with
  * `scrollbar-gutter: stable`): ONE px of overflow here does not spill harmlessly, it

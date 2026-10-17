@@ -415,15 +415,16 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
 
   it('runs a syntax-broken command unmodified, and its record carries the refusal', async () => {
     // The plan DID answer here — its verdict is "PowerShell reported syntax errors" — and it
-    // hands back a best-effort step list. That list is NOT reported: a refused command ran
-    // without markers, so those rows could only ever read "pending", with no timing and no
-    // output of their own, and the card draws the command and its output instead. The
-    // refusal flag is the record; the steps were the guess it declined to trust.
+    // hands back a best-effort step list. That list is NOT reported: the command ran without
+    // markers, so those rows could only ever read "pending", with no timing and no output of
+    // their own. The ONE step the record carries is the whole command, which the card draws
+    // as a single segment; `refused` is what tells the client the command was not split.
     const { result, handed } = await throughTool(BROKEN_BUT_BALANCED)
     const plain = await shell(BROKEN_BUT_BALANCED)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
-    expect(result.progress.steps).toEqual([])
+    expect(result.progress.steps).toHaveLength(1)
+    expect(result.progress.steps[0]?.text).toBe(BROKEN_BUT_BALANCED)
     expect(handed).toBe(BROKEN_BUT_BALANCED)
     expect(result.stdout.text).toBe(plain.stdout)
     expect(result.exitCode).toBe(plain.code)
@@ -442,9 +443,10 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
     const plain = await shell(UNCLOSED_BRACE)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
-    // NO steps: a refusal is not a guess, so the empty list is the honest answer —
-    // and the card's notice therefore cannot hang on a step count.
-    expect(result.progress.steps).toEqual([])
+    // ONE step: the whole command. A refusal is not a guess, so it never reports the
+    // planner's rows — but the command itself is real, and the card draws it as one segment.
+    expect(result.progress.steps).toHaveLength(1)
+    expect(result.progress.steps[0]?.text).toBe(UNCLOSED_BRACE)
     expect(handed).toBe(UNCLOSED_BRACE)
     expect(result.stdout.text).toBe(plain.stdout)
     expect(result.exitCode).toBe(plain.code)
@@ -463,7 +465,8 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
     const plain = await shell(OVERSIZED)
     expect(result.progress.instrumented).toBe(false)
     expect(result.progress.refused).toBe(true)
-    expect(result.progress.steps).toEqual([])
+    expect(result.progress.steps).toHaveLength(1)
+    expect(result.progress.steps[0]?.text).toBe(OVERSIZED)
     expect(handed).toBe(OVERSIZED)
     expect(handed).not.toContain('__DSH_STEP_')
     expect(result.stdout.text).toBe(plain.stdout)
@@ -482,7 +485,8 @@ describe.skipIf(!available)('the tool path instruments from the plan, not the br
       const plain = await shell(IF_ELSE)
       expect(result.progress.instrumented).toBe(false)
       expect(result.progress.refused).toBe(true)
-      expect(result.progress.steps).toEqual([])
+      expect(result.progress.steps).toHaveLength(1)
+      expect(result.progress.steps[0]?.text).toBe(IF_ELSE)
       expect(handed).toBe(IF_ELSE)
       expect(handed).not.toContain('__DSH_STEP_')
       expect(result.stdout.text).toBe(plain.stdout)

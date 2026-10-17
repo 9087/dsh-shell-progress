@@ -30,7 +30,7 @@
 
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { DisclosureRow } from '@deepseek-ai/dsh-client-ui-primitives'
+import { DisclosureRow, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { LiveSnapshot } from '../types.ts'
@@ -57,6 +57,36 @@ function PromptGlyph(): ReactNode {
       />
       <path d="M8.2 10.2h2.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
+  )
+}
+
+/**
+ * The `⚠` that marks a card whose command was not tracked.
+ *
+ * A refusal is not an error — the command ran, and ran unmodified — so the mark is the
+ * system's warning AMBER as a plain triangle rather than a red badge, and it is centred
+ * inside the header's line so it sits on the title's own axis. It is an ORDINARY tooltip,
+ * not a hover card: the message is one sentence, so the shell's own bubble is the right
+ * weight (and the segment's hover card next to it stays the only CARD in this plugin).
+ * It stays a hand cursor — a mark that opens something is a thing to point at.
+ * @param props.label - the explanation, in the reader's language.
+ * @returns the mark and its tooltip.
+ */
+function UntrackedMark({ label }: { readonly label: string }): ReactNode {
+  return (
+    // The marker attribute lives on a plain wrapper, NOT on the tooltip's anchor: the shell's
+    // `Tooltip` is a client-side surface (its bubble measures itself in the DOM), so a static
+    // render keeps the wrapper and drops the anchor inside it. The card's own claim — "this
+    // command was not tracked" — must survive that, which is what this wrapper is for.
+    <span className={styles.untrackedAnchor} data-untracked="true">
+      <Tooltip label={label} side="bottom" portal delayMs={120} maxWidth={360}>
+        <span
+          className={styles.untracked}
+          aria-label={label}
+          tabIndex={0}
+        >{'\u26A0'}</span>
+      </Tooltip>
+    </span>
   )
 }
 
@@ -131,17 +161,13 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
     statusFailed: t('status.failed'),
   }
 
-  // The only notice left is about LOST OUTPUT. The other one — "this command ran
-  // unmodified" — is gone on purpose: a refused call now renders the plain body below
-  // (`PlainBody`) instead of a bar and a step list, which says the same thing by showing no
-  // progress line at all, and WHY it was refused goes to the host log, where a reader who
-  // wants the reason can find it.
+  // The only notice left is about LOST OUTPUT. The refusal itself is now said twice: the
+  // header carries a `!` whose hover card explains it, and its ONE step is the whole
+  // command, so the card is shaped like any other. The plain body is kept for a record
+  // whose step list is EMPTY — a refusal persisted by an older host, which has nothing to
+  // draw a bar from.
   const notice = settled && view.partial ? t('row.partial') : undefined
-
-  // A refused command ran WITHOUT instrumentation, so the host reports no steps for it: the
-  // card keeps its header, shows no bar, no counter and no rows, and renders the command and
-  // its output as one block.
-  const plain = view.refused && !view.instrumented
+  const plain = view.refused && view.total === 0
 
 
   return (
@@ -158,10 +184,15 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
         // The summary stays put when the row opens, exactly as the shell's own
         // tool rows keep theirs.
         keepContentWhenOpen
-        collapsedContent={args.description === undefined ? undefined : (
+        collapsedContent={(
           <>
-            <span className={styles.sep} aria-hidden="true" />
-            <span className={styles.summary}>{args.description}</span>
+            {view.refused ? <UntrackedMark label={t('row.untracked')} /> : null}
+            {args.description === undefined ? null : (
+              <>
+                <span className={styles.sep} aria-hidden="true" />
+                <span className={styles.summary}>{args.description}</span>
+              </>
+            )}
           </>
         )}
       />

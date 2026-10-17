@@ -156,7 +156,8 @@ const LIVE_RUNS = [
   { callId: LIVE_CALL_ZH, command: LIVE_COMMAND, description: '四步环境体检' },
   // And the one whose output the budget truncates, for the count the card has to state.
   { callId: TRUNCATED_CALL, command: TRUNCATED_COMMAND, description: '输出很长的步骤' },
-  // And the refused one, whose card must degrade to the plain shape.
+  // And the refused one: ONE step carrying the whole command, plus the `!` that says it was
+  // never split.
   { callId: REFUSED_CALL, command: REFUSED_COMMAND, description: 'refused command' },
 ]
 
@@ -333,8 +334,8 @@ export function apply(ctx) {
     arguments: JSON.stringify({ command: TRUNCATED_COMMAND, description: '输出很长的步骤' }),
   })
 
-  // ...and one the host REFUSED to instrument, whose card draws the command and its output
-  // instead of a bar and a step list.
+  // ...and one the host REFUSED to instrument: it is still ONE command, so its card draws one
+  // segment and one row (the whole command) plus the `!` saying the command was not split.
   session.append('tool/call', {
     turn: 2,
     step: 1,

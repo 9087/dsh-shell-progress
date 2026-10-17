@@ -139,15 +139,39 @@ function settledBlock(): Record<string, unknown> {
 }
 
 /**
- * A settled call the host REFUSED to instrument: the metadata carries the flag, and its step
- * list is EMPTY — a refusal is not a guess, so the host reports nothing to draw.
+ * A settled call the host REFUSED to instrument, in the CURRENT record shape: the flag, and
+ * ONE step whose text is the WHOLE command — the command is real, only its division is
+ * missing. Its output rides that one step, because the tracker was given that one step to
+ * attribute to.
  *
- * It also carries a command and a preamble, because that is what a refused record actually
- * holds: no marker was ever written, so every line the command printed arrives as the
- * preamble. The card renders those two as its body, which is a browser claim — see the
- * refusal test below.
+ * The card must draw the same single segment a one-line command draws, plus a `!` in the
+ * header saying the command was not split — see the refusal tests below.
  */
 function refusedBlock(): Record<string, unknown> {
+  const command = 'Write-Output "a: b"\n"$v: c"'
+  return {
+    ...settledBlock(),
+    call: {
+      name: 'shell_progress',
+      argsRaw: JSON.stringify({ command, description: 'refused demo' }),
+    },
+    meta: {
+      v: 1,
+      instrumented: false,
+      refused: true,
+      partial: false,
+      preamble: '',
+      steps: [{ line: 1, text: command, output: 'the whole output\nstill the whole output', startedAt: 0, endedAt: 5 }],
+    },
+  }
+}
+
+/**
+ * A refused record in the PREVIOUS shape: NO steps, the output in the preamble. No current
+ * host writes this — it is what an older session log replays — and the card keeps the plain
+ * body for it, because with no step there is nothing to draw a bar from.
+ */
+function legacyRefusedBlock(): Record<string, unknown> {
   return {
     ...settledBlock(),
     call: {
@@ -658,27 +682,47 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(afterCounter, 'an element still follows the count inside the progress line').not.toContain('data-phase=')
   })
 
-  // The rendered proof for the refusal signal: a refused call gets NO progress line, no
-  // counter and no step row — it is not a quiet command, it is one that was never tracked.
-  // The body it draws instead (the command and the whole output) is a browser claim: the
-  // card is COLLAPSED in a static render, and its body only exists once opened.
+  // The rendered proof for the refusal signal, CURRENT shape. The host reports the refused
+  // command as ONE step — the whole command — so the card draws one segment and a counter
+  // like any one-line command, and the refusal is said by the `!` in the header. Its
+  // explanation lives in a hover card, which a static render cannot open; the browser suite
+  // opens it and reads it.
 
-  it('draws no bar, no counter and no step row for a REFUSED call', async () => {
+  it('draws one segment, a counter and the untracked mark for a REFUSED call', async () => {
     const html = await renderCard(refusedBlock())
+    expect(html).toContain('data-progress-line')
+    expect(html).toContain('row.counter')
+    expect(
+      (html.match(/data-phase="/g) ?? []),
+      'the refused card does not draw exactly one segment',
+    ).toHaveLength(1)
+    expect(html, 'the refused card carries no `!`').toContain('data-untracked="true"')
+    // EVERY line of the command, not just the first: an untracked command is one step whose
+    // text is the whole multi-line command, and `highlightCommand` tokenises one line.
+    expect(html, 'the refused row lost the command\'s second line').toContain('$v: c')
+    // No notice: the `!` is the signal, and the lost-output notice is a different thing.
+    expect(html).not.toContain('row.partial')
+  })
+
+  // A refusal persisted by an OLDER host: no steps at all, so nothing exists to draw a bar
+  // from and the card falls back to the plain body. It keeps the `!` — what is missing is the
+  // step, not the refusal.
+  it('falls back to no bar for a LEGACY refused record whose step list is empty', async () => {
+    const html = await renderCard(legacyRefusedBlock())
     expect((html.match(/data-phase=/g) ?? [])).toHaveLength(0)
     expect(html).not.toContain('data-counter')
     expect(html).not.toContain('data-progress-line')
-    // And no notice either: the card says nothing about tracking any more. The reason a
-    // command was refused goes to the host log, where its reader can act on it.
-    expect(html).not.toContain('row.partial')
+    expect(html).toContain('data-untracked="true"')
   })
 
   it('keeps the progress line for a single-step command that was merely uninstrumented', async () => {
     const html = await renderCard(singleStepBlock())
     // It is still a card with its own counter, because it WAS tracked: one step, one
-    // segment. A refusal and this must not look alike.
+    // segment. A single-line command and an untracked one now LOOK the same — that is
+    // deliberate — and the `!` is what tells them apart.
     expect(html).toContain('row.counter')
     expect(html).toContain('data-progress-line')
+    expect(html, 'a tracked single-step command carries the untracked `!`').not.toContain('data-untracked=')
     // AND it draws its bar. One step is ONE segment, not none: a single-line command
     // used to get a counter and no bar at all, which is the shape this pins.
     expect((html.match(/data-phase="/g) ?? []), 'the single-step card drew no segment').toHaveLength(1)

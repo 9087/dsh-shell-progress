@@ -1435,11 +1435,11 @@ test.describe('the shell_progress card in a real shell', () => {
       'a card of complete steps carries a truncation note',
     ).toBe(0)
     // ---------------------------------------------------------------------------
-    // THE PLAIN CARD. A refused command was never instrumented, so there is no step to
-    // point at and the host reports none. The card draws the command and everything the
-    // command printed, and NOTHING that only a tracked run can have: no progress line, no
-    // counter, no step row. The planner's best-effort step list is dropped rather than
-    // rendered as rows that could only ever read "pending".
+    // THE UNTRACKED CARD. A refused command was never instrumented, but it is still ONE
+    // command: the host reports it as one step whose text is the whole command, so the card
+    // draws the same single segment a one-line command draws — bar, counter, one row and
+    // the segment's hover card — plus a `!` in the header whose hover card says the command
+    // was not split and that the bar therefore describes the whole command.
     // ---------------------------------------------------------------------------
     const refused = page.locator(`[data-chat-call-id="${REFUSED_CALL}"]`)
     await expect(refused, 'the fixture never rendered the refused card').toBeAttached({ timeout: 60_000 })
@@ -1448,53 +1448,60 @@ test.describe('the shell_progress card in a real shell', () => {
     await revealCard(refused)
     await expect(
       refused.locator('[data-plain-body="true"]'),
-      'a refused card drew no plain body',
-    ).toBeAttached({ timeout: 60_000 })
+      'an untracked card still drew the old plain body',
+    ).toHaveCount(0)
+    await expect(
+      refused.locator('[data-progress-line="true"]'),
+      'an untracked card drew no progress line',
+    ).toHaveCount(1, { timeout: 60_000 })
     const refusal = await refused.evaluate((node) => {
-      const body = node.querySelector('[data-plain-body="true"]')
-      const cardLeft = node.getBoundingClientRect().left
-      const left = (element: Element | null | undefined): number | null =>
-        element === null || element === undefined ? null : element.getBoundingClientRect().left - cardLeft
-      const header = node.querySelector('[data-disclosure-row]')
+      const bar = node.querySelector('[data-progress-line="true"]')
       return {
-        command: body?.querySelector('[data-code="true"]')?.textContent ?? null,
-        output: body?.querySelector('[data-output="true"]')?.textContent ?? null,
-        progressLines: node.querySelectorAll('[data-progress-line="true"]').length,
+        command: node.querySelector('[data-code="true"]')?.textContent ?? null,
+        output: node.querySelector('[data-output="true"]')?.textContent ?? null,
+        segments: bar?.querySelectorAll('[data-phase]').length ?? -1,
         counters: node.querySelectorAll('[data-counter="true"]').length,
-        rows: node.querySelectorAll('[data-phase]').length,
-        dots: body?.querySelectorAll('[data-dot="true"]').length ?? -1,
-        markers: body?.querySelectorAll('[data-marker="true"]').length ?? -1,
-        commandLeft: left(body?.querySelector('[data-code="true"]')),
-        outputLeft: left(body?.querySelector('[data-output="true"]')),
-        titleLeft: left(header?.lastElementChild),
+        counter: node.querySelector('[data-counter="true"]')?.textContent ?? null,
+        rows: node.querySelectorAll('[data-step]').length,
+        dots: node.querySelectorAll('[data-dot="true"]').length,
+        marks: node.querySelectorAll('[data-untracked="true"]').length,
       }
     })
     console.log(`[e2e] refusal ${JSON.stringify(refusal)}`)
-    // What the card must still say: the command, and the output the command produced.
-    expect(refusal.command, 'the plain body does not carry the command').toContain('Write-Output "alpha"')
-    expect((refusal.output ?? '').length, 'the plain body lost the output').toBeGreaterThan(0)
-    // And what it must NOT: the bar, the counter, the rows, the step dots.
-    expect(refusal.progressLines, 'a refused card drew a progress line').toBe(0)
-    expect(refusal.counters, 'a refused card drew a counter').toBe(0)
-    expect(refusal.rows, 'a refused card drew step rows').toBe(0)
-    expect(refusal.dots, 'a refused card drew a step dot').toBe(0)
-    // AND NO MARKER COLUMN. A refused card is not a step: there is no dot to put in the
-    // column, so reserving it would only hold the command to the right of the title it
-    // belongs to. The command therefore starts on the TITLE's own column — the shell's
-    // 16px leading slot plus its 6px gap, which the progress line and the header share —
-    // and the output starts on that same column rather than under a dot it does not have.
-    expect(refusal.markers, 'a refused card kept the step list\'s marker column').toBe(0)
-    const titleOffset = (refusal.commandLeft ?? -1) - (refusal.titleLeft ?? -2)
-    expect(
-      Math.abs(titleOffset),
-      `the plain command starts at ${refusal.commandLeft}px, the title at ${refusal.titleLeft}px: not one column`,
-    ).toBeLessThanOrEqual(1)
-    expect(
-      Math.abs((refusal.outputLeft ?? -1) - (refusal.commandLeft ?? -2)),
-      `the plain output starts at ${refusal.outputLeft}px, its command at ${refusal.commandLeft}px`,
-    ).toBeLessThanOrEqual(1)
-    // The plain body in view, for the human check.
-    await refused.locator('[data-plain-body="true"]').scrollIntoViewIfNeeded()
+    // ONE command, ONE segment, ONE row — and the row carries the WHOLE command.
+    expect(refusal.command, 'the untracked row does not carry the command').toContain('Write-Output "alpha"')
+    expect(refusal.command, 'the untracked row carries only part of the command').toContain('$v: beta')
+    expect((refusal.output ?? '').length, 'the untracked row lost the output').toBeGreaterThan(0)
+    expect(refusal.segments, 'the untracked card does not draw exactly one segment').toBe(1)
+    expect(refusal.counters, 'the untracked card drew no counter').toBe(1)
+    expect(refusal.counter?.trim(), `the untracked card counts ${refusal.counter}, not 1/1`).toMatch(/1\/1/)
+    expect(refusal.rows, 'the untracked card does not draw exactly one row').toBe(1)
+    expect(refusal.dots, 'the untracked card does not draw a step dot').toBe(1)
+    expect(refusal.marks, 'the untracked card carries no `!`').toBe(1)
+    // ...and the segment still opens its own card: the untracked card has a step to point at.
+    // Asked BEFORE the `!`, because the tooltip it opens covers the bar and would swallow the
+    // pointer the segment needs.
+    await refused.locator('[data-progress-line="true"] [data-phase]').first().hover()
+    await expect(
+      page.locator('[data-step-card]').first(),
+      'the untracked segment opened no hover card',
+    ).toBeVisible({ timeout: 10_000 })
+    // THE `!` EXPLAINS ITSELF ON HOVER. The segment's card must be OUT of the way first: it is
+    // portaled OVER the header, so a pointer heading for the `!` would land on that card
+    // instead and never reach the mark.
+    await page.mouse.move(5, 5)
+    await expect(
+      page.locator('[data-step-card]'),
+      'the segment\'s card never closed',
+    ).toHaveCount(0, { timeout: 10_000 })
+    await refused.locator('[data-untracked="true"]').hover()
+    await expect(
+      page.getByRole('tooltip'),
+      'the `!` opened no explanation',
+    ).toBeVisible({ timeout: 10_000 })
+    const untrackedNote = (await page.getByRole('tooltip').first().textContent()) ?? ''
+    expect(untrackedNote.trim().length, 'the `!` explanation is empty').toBeGreaterThan(10)
+    await refused.scrollIntoViewIfNeeded()
     await page.screenshot({ path: SHOT.replace('.png', '-refused.png') })
     console.log(`[e2e] refusal shot -> ${SHOT.replace('.png', '-refused.png')}`)
   })
