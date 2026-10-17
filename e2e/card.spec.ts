@@ -44,6 +44,12 @@ import {
 /** The fixture's own id and the call ids it publishes. */
 const SESSION_ID = 'e2e-shell-progress'
 const PROGRESS_CALL = 'call-progress-1'
+/**
+ * The settled card the README's HOVER figure is shot from. A second settled card, published
+ * in the OPEN turn: the first turn is folded away in the figure context, and a card that is
+ * not on screen cannot be hovered.
+ */
+const FIGURE_CALL = 'call-figure-hover-1'
 const NATIVE_CALL = 'call-pwsh-1'
 /** A call whose turn never ends, so its card renders in the RUNNING arm. */
 const RUNNING_CALL = 'call-running-1'
@@ -1320,13 +1326,13 @@ test.describe('the shell_progress card in a real shell', () => {
       const englishHost = await startHost(dsh!, englishFixture.home, englishFixture.workspace, englishFixture.logFile, [
         '--patch',
         join(repoRoot, 'e2e', 'fixtures', 'profile.patch.yml'),
-      ])
+      ], 'en')
       try {
         const englishSession = await waitForMarker(englishHost.logFile, MARKER, 60_000)
         expect(englishSession, `the English fixture never announced its session:\n${tail(englishHost.logFile)}`).toBe(SESSION_ID)
         const english = await captureFigure(
           browser, englishHost.url, englishSession!, 'en-US', LIVE_CALL, README_SHOT, README_HOVER_SHOT,
-          'Run a command with shell_progress_pwsh',
+          FIGURE_CALL, 'Run a command with shell_progress_pwsh',
         )
         console.log(`[e2e] figure en ${JSON.stringify(english)}`)
       } finally {
@@ -1341,13 +1347,13 @@ test.describe('the shell_progress card in a real shell', () => {
       const chineseHost = await startHost(dsh!, chineseFixture.home, chineseFixture.workspace, chineseFixture.logFile, [
         '--patch',
         join(repoRoot, 'e2e', 'fixtures', 'profile.patch.yml'),
-      ])
+      ], 'zh')
       try {
         const chineseSession = await waitForMarker(chineseHost.logFile, MARKER, 60_000)
         expect(chineseSession, `the Chinese fixture never announced its session:\n${tail(chineseHost.logFile)}`).toBe(SESSION_ID)
         const chinese = await captureFigure(
           browser, chineseHost.url, chineseSession!, 'zh-CN', LIVE_CALL_ZH, README_SHOT_ZH, README_HOVER_SHOT_ZH,
-          '使用 shell_progress_pwsh 运行命令',
+          FIGURE_CALL, '使用 shell_progress_pwsh 运行命令',
         )
         console.log(`[e2e] figure zh ${JSON.stringify(chinese)}`)
       } finally {
@@ -1525,6 +1531,11 @@ test.describe('the shell_progress card in a real shell', () => {
  *   next. Setting both removes the race instead of betting on one side of it.
  * @param callId - the live call whose card is photographed.
  * @param path - where the PNG goes.
+ * @param hoverPath - where the hover-card figure goes.
+ * @param hoverCallId - the SETTLED call whose segment is hovered for that figure. It is a
+ *   different card from `callId` on purpose: a live run's notes come from a model the
+ *   fixture host does not have, so a hover figure of the live card would show no note while
+ *   the README beside it says there is one. The settled record carries the seeded notes.
  * @param titleText - the title text to WAIT for before shooting: the card's title is the
  *   shell's, and the stored `locale.preference` replaces the client's provisional
  *   browser-derived language once the plugin activates, so the wrong one is on screen
@@ -1539,6 +1550,7 @@ async function captureFigure(
   callId: string,
   path: string,
   hoverPath: string,
+  hoverCallId: string,
   titleText: string,
 ): Promise<{ readonly title: string; readonly width: number }> {
   const context = await browser.newContext({ locale, viewport: { width: README_FIGURE_WIDTH, height: 900 } })
@@ -1566,15 +1578,32 @@ async function captureFigure(
     await expect(card, `${callId}'s card never took its ${titleText} title`).toContainText(titleText, { timeout: 30_000 })
     mkdirSync(dirname(path), { recursive: true })
     await card.screenshot({ path, animations: 'disabled' })
-    // The hover card, same moment, same context: a UNION crop, because the card is
-    // portaled out of the row (see `README_HOVER_SHOT`) and `card.screenshot` would clip
-    // the tooltip away entirely.
-    await card.locator('[role="progressbar"] [data-phase]').first().hover({ timeout: 10_000 })
+    // The hover figure, from the SETTLED card: its notes are part of the record, and the
+    // README says the hover card carries one. A UNION crop, because the card is portaled out
+    // of the row (see `README_HOVER_SHOT`) and `card.screenshot` would clip the tooltip away.
+    const hoverTarget = page.locator(`[data-chat-call-id="${hoverCallId}"]`)
+    await expect(hoverTarget, `the fixture never rendered ${hoverCallId}`).toBeAttached({ timeout: 90_000 })
+    // The settled card lives in an EARLIER turn, and the shell may have that turn folded away
+    // by the time the live figure has been shot: unfold it and open the card, or its bar is
+    // attached but not visible and the hover can never land.
+    await expandTranscript(page)
+    await hoverTarget.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
+    await revealCard(hoverTarget)
+    // The SECOND segment, not the first: it carries a note, and its card opens INSIDE the
+    // card's own area — hovering the first one puts the card above the row and the crop then
+    // pulls in whatever card sits above it.
+    const hoverSegment = hoverTarget.locator('[role="progressbar"] [data-phase]').nth(1)
+    await expect(hoverSegment, `${hoverCallId}'s bar is not on screen`).toBeVisible({ timeout: 10_000 })
+    await hoverSegment.hover({ timeout: 10_000 })
     const portal = page.locator('body > div:has(> [data-step-card])').first()
-    await expect(portal, `${callId}'s segment opened no hover card`).toBeVisible({ timeout: 10_000 })
-    const cardBox = await card.boundingBox()
+    await expect(portal, `${hoverCallId}'s segment opened no hover card`).toBeVisible({ timeout: 10_000 })
+    await expect(
+      portal.locator('[data-card-note="true"]'),
+      `${hoverCallId}'s hover card shows no note, so the figure would not show one either`,
+    ).toBeVisible({ timeout: 10_000 })
+    const cardBox = await hoverTarget.boundingBox()
     const portalBox = await portal.boundingBox()
-    if (cardBox === null || portalBox === null) throw new Error(`${callId}: the hover shot has no box to crop to`)
+    if (cardBox === null || portalBox === null) throw new Error(`${hoverCallId}: the hover shot has no box to crop to`)
     const pad = 8
     const left = Math.max(0, Math.min(cardBox.x, portalBox.x) - pad)
     const top = Math.max(0, Math.min(cardBox.y, portalBox.y) - pad)

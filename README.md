@@ -28,7 +28,7 @@ now**, as a segmented progress bar inside the tool-call card.
 
 Collapsed, the card's summary row carries a segmented bar, one segment per top-level step (pending, running or done), beside a `3/4` counter, so where the command is and how many steps are left read at a glance. Hover a segment and it opens that step's card, showing its command line, its output and its time.
 
-![The card a segment opens on hover: that step's own command line, its output and its time](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/hover.png)
+![The card a segment opens on hover: a line of prose above the command, then that step's output and time](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/hover.png)
 
 In the hover card, each step gets a one-line comment above its command line, spelling out what that line is for: written in the current interface language, with the command's own strings left exactly as they are. (The lines come from the model, which costs one extra call per command; they can be switched off on the DSH Settings page under "Shell Progress" and are on by default.)
 

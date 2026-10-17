@@ -62,6 +62,20 @@ const COMMAND = [
   'Write-Output "[4/4] pack"',
 ].join('\n')
 
+/** The language the host renders in; the seeded notes are the only ones a test can see. */
+const LOCALE = process.env.DSH_E2E_LOCALE ?? 'zh'
+
+/**
+ * The seeded notes, one per annotated step, IN THE HOST'S LANGUAGE.
+ *
+ * The fixture has no model, so these are the only notes any test — and any README figure —
+ * can see. They follow the host locale because the figure of the English README must not
+ * carry Chinese annotations: `DSH_E2E_LOCALE` is set by the figure hosts for exactly this.
+ */
+const NOTES = LOCALE === 'en'
+  ? ['Fetch the dependencies into the local cache', 'Compile the output into dist']
+  : ['拉取依赖并写入本地缓存', '编译产物到输出目录']
+
 /** The persisted presentation metadata, in the shape the card reads. */
 const PROGRESS_META = {
   v: 1,
@@ -71,15 +85,25 @@ const PROGRESS_META = {
   steps: [
     // `note` on the first two steps and absent on the last two ON PURPOSE: the card must
     // draw the model's line where there is one and NOTHING where there is not (a blank
-    // comment line would be worse than no note), and the e2e asserts both halves. The
-    // fixture has no model, so these are the only notes any test can see — written in the
-    // language of the host that renders them (the suite's own home is `zh`).
-    { line: 1, text: 'Write-Output "[1/4] fetch"', output: '[1/4] fetch', note: '拉取依赖并写入本地缓存', startedAt: 0, endedAt: 1_200 },
-    { line: 2, text: 'Write-Output "[2/4] build"', output: '[2/4] build', note: '编译产物到输出目录', startedAt: 1_200, endedAt: 6_400 },
+    // comment line would be worse than no note), and the e2e asserts both halves.
+    { line: 1, text: 'Write-Output "[1/4] fetch"', output: '[1/4] fetch', note: NOTES[0], startedAt: 0, endedAt: 1_200 },
+    { line: 2, text: 'Write-Output "[2/4] build"', output: '[2/4] build', note: NOTES[1], startedAt: 1_200, endedAt: 6_400 },
     { line: 3, text: 'Write-Output "[3/4] test"', output: '[3/4] test', startedAt: 6_400, endedAt: 7_600 },
     { line: 4, text: 'Write-Output "[4/4] pack"', output: '[4/4] pack', startedAt: 7_600, endedAt: 8_000 },
   ],
 }
+
+/** The summary line for the figure card, in the host's language, like the live demos. */
+const FIGURE_DESCRIPTION = LOCALE === 'en' ? 'four-step build demo' : '四步构建演示'
+
+/**
+ * The call id of the SETTLED card the README's HOVER figure is shot from.
+ *
+ * It is published in the OPEN turn rather than reusing `call-progress-1`: the shell folds the
+ * first turn away in the figure context, and a hover cannot land on a card that is not on
+ * screen. Same command, same metadata, same notes — only the position differs.
+ */
+const FIGURE_CALL = 'call-figure-hover-1'
 
 /**
  * The command the LIVE card reports, and the call id its record is written under.
@@ -89,10 +113,12 @@ const PROGRESS_META = {
  * steps).
  *
  * EVERY STEP IS REAL WORK. The figure is meant to look like a command somebody would
- * actually run, so the four lines print a timestamp, count processes, measure the
+ * actually run, so the four lines print a timestamp, count processes, count the files in the
  * PowerShell install, and run a bounded computation — no `Start-Sleep` padding anywhere.
- * The computation is also what keeps the card IN FLIGHT while the shutter opens, long
- * enough that the picture shows a step with a ticking clock whatever the spec's own
+ * Every one of them prints ONE value: a `Measure-Object -Property … -Sum` table was here
+ * first and it drew three blank rows in the picture, which read as broken rather than as
+ * output. The computation is also what keeps the card IN FLIGHT while the shutter opens,
+ * long enough that the picture shows a step with a ticking clock whatever the spec's own
  * timing turns out to be. Nothing here reads the network or the session's working
  * directory, so the figure depends on neither.
  */
@@ -100,7 +126,7 @@ const LIVE_CALL = 'call-live-1'
 const LIVE_COMMAND = [
   "(Get-Date).ToString('MM-dd HH:mm:ss')",
   '(Get-Process | Measure-Object).Count',
-  'Get-ChildItem -Path $PSHOME -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum',
+  '(Get-ChildItem -Path $PSHOME -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count',
   '1..3000000 | ForEach-Object { $_ * 2 } | Measure-Object -Sum',
 ].join('\n')
 
@@ -112,7 +138,12 @@ const LIVE_COMMAND = [
  * segment gets a real start and end instead of reading "pending" forever.
  */
 const SOLE_CALL = 'call-live-sole-1'
-const SOLE_COMMAND = "& { Start-Sleep -Seconds 20; Write-Output 'one line' }"
+/**
+ * Forty-five seconds, not twenty: the suite now shoots TWO figures (each with its own boot and
+ * hover) between the start of this run and the check that reads its one segment in flight, and
+ * a run that ends first reads as "never running" rather than as a failure of the card.
+ */
+const SOLE_COMMAND = "& { Start-Sleep -Seconds 45; Write-Output 'one line' }"
 
 /** The same four-step command under a second call id, so one card can be English-named. */
 const LIVE_CALL_ZH = 'call-live-zh-1'
@@ -303,6 +334,22 @@ export function apply(ctx) {
     name: 'shell_progress_pwsh',
     arguments: JSON.stringify({ command: LIVE_COMMAND, description: 'four-step environment check' }),
   })
+
+  // The settled card the hover figure is shot from: in THIS open turn, so it stays on screen
+  // in the figure's narrow context, where the first turn is folded away.
+  session.append('tool/call', {
+    turn: 2,
+    step: 1,
+    callId: FIGURE_CALL,
+    name: 'shell_progress_pwsh',
+    arguments: JSON.stringify({ command: COMMAND, description: FIGURE_DESCRIPTION }),
+  })
+  session.append('tool/result', {
+    turn: 2,
+    step: 1,
+    message: toolMessage(FIGURE_CALL, '[1/4] fetch\n[2/4] build\n[3/4] test\n[4/4] pack'),
+    meta: PROGRESS_META,
+  }, { surfaceOp: 'append' })
 
   // ...and the single-LINE one, whose card is the case a one-step command used to get
   // a counter for and no bar at all.

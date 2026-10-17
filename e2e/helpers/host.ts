@@ -143,6 +143,9 @@ async function canBind(port: number): Promise<boolean> {
  *   app's own flags: `--patch` belongs to the profile layer, while the app
  *   passes unknown options straight through and rejects them. Placing them
  *   before `web` instead makes the CLI demand an explicit `--profile`.
+ * @param locale - the interface language the child should boot in, exported as
+ *   `DSH_E2E_LOCALE` so a fixture can publish strings (annotations, summaries) in THAT
+ *   language. Omitted when the fixture's own default applies.
  * @returns the booted host.
  */
 export async function startHost(
@@ -151,6 +154,7 @@ export async function startHost(
   workspace: string,
   logFile: string,
   extraArgs: readonly string[] = [],
+  locale?: string,
 ): Promise<Host> {
   const port = await freePort()
   const fd = openSync(logFile, 'a')
@@ -159,7 +163,12 @@ export async function startHost(
     [...dsh.prefix, 'web', ...extraArgs, '--host', '127.0.0.1', '--port', String(port), '--no-open'],
     {
       cwd: workspace,
-      env: { ...process.env, DSH_HOME: home, DSH_E2E_WORKSPACE: workspace },
+      env: {
+        ...process.env,
+        DSH_HOME: home,
+        DSH_E2E_WORKSPACE: workspace,
+        ...(locale === undefined ? {} : { DSH_E2E_LOCALE: locale }),
+      },
       stdio: ['ignore', fd, fd],
       windowsHide: true,
     },
