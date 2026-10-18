@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/9087/dsh-shell-progress/compare/v0.5.0...v0.6.0) (2026-10-18)
+
+### Features
+
+* let PowerShell's parser decide where a step starts ([86e597d](https://github.com/9087/dsh-shell-progress/commit/86e597dd0d542929ff7d643304ffd5e69abf4fb6))
+* **notes:** fetch a missed note on demand instead of holding the turn ([f1e2829](https://github.com/9087/dsh-shell-progress/commit/f1e2829f2e759e7c85ab8bf74a20062340316996))
+* show the command's total time in the card header. ([79adb82](https://github.com/9087/dsh-shell-progress/commit/79adb827e77ac23b989c950a9326f0c6c283e076))
+* split a one-line ";" chain into steps, and wrap a long one readably ([6ef0deb](https://github.com/9087/dsh-shell-progress/commit/6ef0debf7cf392b8ba8750ee44bcf692e6bbf141))
+
+### Bug Fixes
+
+* **notes:** ask for no thinking, read only visible text, and say why a note is missing ([06a72b3](https://github.com/9087/dsh-shell-progress/commit/06a72b328336396a0c905ea3cd290126eb6050d2))
+
 ## [0.5.0](https://github.com/9087/dsh-shell-progress/compare/v0.4.2...v0.5.0) (2026-10-17)
 
 ### Features
