@@ -39,7 +39,6 @@
     "src/render.ts",
     "src/run.ts",
     "src/split.ts",
-    "src/statements.ts",
     "src/tracker.ts",
     "src/types.ts",
     "src/wrap.ts"

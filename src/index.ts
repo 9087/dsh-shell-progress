@@ -53,7 +53,6 @@ import { drain, follow } from './run.ts'
 import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
 import type { SplitResult, Step } from './split.ts'
-import { normalizeStatements, relabelSteps } from './statements.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
 import type { LiveSnapshot, NotesRoute, NotesState, RefusalCode, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
@@ -464,10 +463,12 @@ function refusalCode(reason: string): RefusalCode {
 /**
  * The split to instrument with: the dialect's authoritative plan when it has
  * one, else its own heuristic — and NEVER the heuristic for a dialect that has
- * a planner.
+ * a planner, unless the command has no statement separator at all (where the
+ * heuristic's single line IS the parser's single statement, and spawning a
+ * probe would buy nothing).
  *
  * A dialect that ships a planner has handed "what is a top-level statement?" to
- * that dialect's real parser, so when the planner cannot deliver a parse there is
+ * that dialect's real parser, so when the planner cannot deliver an answer there is
  * no answer left to fall back on. The heuristic is a DIFFERENT implementation of
  * the same question, and two independent implementations cannot be shown to
  * agree: an unconfirmed boundary is exactly the guess that can land a marker
@@ -486,7 +487,8 @@ function refusalCode(reason: string): RefusalCode {
 async function resolveSplit(dialect: ShellDialect, command: string): Promise<SplitResult> {
   const heuristic = dialect.split(command)
   if (dialect.plan === undefined) return heuristic
-  if (heuristic.safe && heuristic.steps.length <= 1) return heuristic
+  // No `;` and no newline: one statement, and the heuristic already says so exactly.
+  if (!/[;\r\n]/u.test(command)) return heuristic
   let planned: SplitResult | undefined
   try {
     planned = await dialect.plan(command)
@@ -673,16 +675,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         const standing = exec.agent === undefined ? {} : { session: exec.agent.session }
         const policy = sandboxPolicy?.resolve(standing)
         const readOnly = policy?.mode === 'read-only'
-        // A `;` chain on ONE line is normalized to one top-level statement per line FIRST, so
-        // the line-based planner and the line-start markers apply unchanged — PowerShell treats
-        // `;` and a newline as the same statement separator. Only PowerShell: bash has
-        // `case`/`;;` forms this scanner deliberately does not read. When the scanner refuses
-        // (quotes, `#`, here-strings, blocks, a continuation) the command runs exactly as
-        // written and is reported as it would have been before.
-        const normalized = dialect.id === 'pwsh' ? normalizeStatements(args.command) : undefined
-        const commandText = normalized?.text ?? args.command
-        const split = await resolveSplit(dialect, commandText)
-        const reason = refusalReason(dialect, commandText, split, readOnly, maxSteps)
+        // THE PARSER DECIDES WHERE THE STEPS ARE, not a scanner of ours: for PowerShell the
+        // probe reports every top-level statement's extent, so a one-line `a; b; c` splits
+        // and the boundaries are never guessed (see `./pwshtree.ts`).
+        const split = await resolveSplit(dialect, args.command)
+        const reason = refusalReason(dialect, args.command, split, readOnly, maxSteps)
         const instrumented = reason === undefined
         // The reason itself is English and internal (it goes to the host log); the card gets a
         // CODE so its tooltip can be written in the reader's language. See `RefusalCode`.
@@ -704,14 +701,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         // command — and its output is budgeted like any other step's.
         const steps: readonly Step[] = refused
           ? [{ line: 1, text: args.command }]
-          : normalized === undefined ? split.steps : relabelSteps(split.steps, normalized)
+          : split.steps
         // `warn`, not `debug`: the card no longer says anything about tracking — a refused
         // call shows its command and its output, nothing more — so this line is the only
         // place the REASON is stated, and it has to be visible without debug logging on.
         if (reason !== undefined) ctx.logger.warn(`shell-progress: running the command unmodified — ${reason}`)
 
         const nonce = createNonce()
-        const text = instrumented ? dialect.instrument(commandText, steps, nonce) : args.command
+        const text = instrumented ? dialect.instrument(args.command, steps, nonce) : args.command
         const workdir = resolveWorkdir(args.workdir, exec)
         const request: ShellExecRequest = {
           command: text,

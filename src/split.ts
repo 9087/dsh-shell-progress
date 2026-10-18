@@ -23,16 +23,20 @@
 export interface Step {
   /** 1-based line number in the original command text. */
   readonly line: number
-  /** The line's text, without its terminator. */
+  /** The step's own text, exactly as it appears in the command. */
   readonly text: string
   /**
-   * The line in the EXECUTED text the step's marker must be written on, when the two differ.
+   * The step's marker id, when it is not simply its line.
    *
-   * They differ when a one-line `;` chain was rewritten to one statement per line before
-   * planning (see `./statements`): the marker then belongs on the rewritten line, while the
-   * card must keep showing the line the reader actually typed. Absent means "same line".
+   * A plan built from the parser's statement extents sets this to the step's 1-based index,
+   * because several statements can share one line (see `./pwshtree.ts`); a line-based
+   * splitter leaves it absent and the line is the id.
    */
   readonly anchor?: number
+  /** Character offset in the executed text where this step's own text starts. */
+  readonly start?: number
+  /** Character offset just past this step's own text. */
+  readonly end?: number
 }
 
 /** The splitter's answer: the steps it found, and whether they can be trusted. */

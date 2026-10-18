@@ -122,22 +122,41 @@ function terminatorOf(source: string): string {
 /**
  * Rewrite a command so each top-level step announces itself before it runs.
  *
- * Only the steps' own lines change; every other line is copied verbatim, and
- * the line count is unchanged.
+ * TWO WAYS, because the two kinds of plan know different things:
+ *
+ * - A plan built from the parser's statement EXTENTS knows each step's character span, so
+ *   the marker is inserted exactly where the statement starts — including in the middle of
+ *   a line, after the `;` that separates it — and every other character is untouched. This
+ *   is what makes `a; b; c` three steps.
+ * - A line-based split (bash, and the PowerShell fallback) only knows the step's line, so
+ *   the marker replaces the start of that line, exactly as before.
+ *
+ * Either way the marker is INLINE and keeps `$?` (see the module comment above).
  * @param source - the original command text.
- * @param steps - the steps to mark, from {@link import('./split.ts').splitSteps}.
+ * @param steps - the steps to mark.
  * @param nonce - this call's nonce.
  * @returns the instrumented command text.
  */
 export function instrument(source: string, steps: readonly Step[], nonce: string): string {
-  const terminator = terminatorOf(source)
   const sentinel = `__dsh_shell_progress_absent_${nonce}__`
+  const positioned = steps.every((step) => typeof step.start === 'number' && typeof step.end === 'number')
+  if (positioned) {
+    let out = ''
+    let cursor = 0
+    steps.forEach((step, index) => {
+      const start = step.start ?? 0
+      const end = step.end ?? start
+      out += source.slice(cursor, start)
+      out += `${inlineMarker(nonce, step.anchor ?? index + 1, sentinel)}; ${source.slice(start, end)}`
+      cursor = end
+    })
+    return out + source.slice(cursor)
+  }
+  const terminator = terminatorOf(source)
   const marked = new Map<number, string>()
   for (const step of steps) {
-    // The MARKER lives on the executed line; the card's line stays whatever `step.line` says.
-    // They differ only when a `;` chain was rewritten one statement per line first.
-    const anchor = step.anchor ?? step.line
-    marked.set(anchor, `${inlineMarker(nonce, anchor, sentinel)}; ${step.text}`)
+    const id = step.anchor ?? step.line
+    marked.set(step.line, `${inlineMarker(nonce, id, sentinel)}; ${step.text}`)
   }
   return source
     .split(/\r\n|\n|\r/)

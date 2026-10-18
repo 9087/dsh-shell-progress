@@ -41,7 +41,7 @@ import { execFile } from 'node:child_process'
 import { resolvePowershell } from './pwsh-path.ts'
 import { stepsAtLines } from './plan.ts'
 import { splitSteps } from './split.ts'
-import type { SplitResult } from './split.ts'
+import type { SplitResult, Step } from './split.ts'
 
 /**
  * The verdict line the probe writes with the PARSER'S ERROR COUNT. It is
@@ -50,8 +50,14 @@ import type { SplitResult } from './split.ts'
  */
 export const PROBE_ERRORS = 'ERRORS'
 
-/** The verdict line the probe writes with the top-level statements' start lines. */
-export const PROBE_LINES = 'LINES'
+/**
+ * The verdict line the probe writes with the top-level statements' EXTENTS.
+ *
+ * Each statement is `startLine:startColumn:endLine:endColumn`, statements are comma
+ * separated. The extents are what make a one-line `a; b; c` splittable: two statements can
+ * share a line, so a line number alone cannot say where a boundary is.
+ */
+export const PROBE_STATEMENTS = 'STATEMENTS'
 
 /** How long the probe may run before it is abandoned, in milliseconds. */
 export const PROBE_TIMEOUT_MS = 5_000
@@ -64,14 +70,26 @@ export const PROBE_TIMEOUT_MS = 5_000
  */
 export const MAX_PROBE_CHARS = 24_000
 
+/** One top-level statement's span, as PowerShell's own parser reports it. */
+export interface StatementExtent {
+  /** 1-based line the statement starts on. */
+  readonly startLine: number
+  /** 1-based column the statement starts at. */
+  readonly startColumn: number
+  /** 1-based line the statement ends on. */
+  readonly endLine: number
+  /** 1-based column just past the statement's last character. */
+  readonly endColumn: number
+}
+
 /**
  * One probe's decoded verdict.
  *
- * `errors` is the refusal: PowerShell found syntax it could not parse, so the
- * statement lines (which the probe may well have printed) are ignored.
+ * `errors` is the refusal: PowerShell found syntax it could not parse, so the statement
+ * extents (which the probe may well have printed) are ignored.
  */
 export type ProbeAnswer =
-  | { readonly kind: 'lines'; readonly lines: readonly number[] }
+  | { readonly kind: 'statements'; readonly statements: readonly StatementExtent[] }
   | { readonly kind: 'errors'; readonly count: number }
 
 /**
@@ -90,7 +108,7 @@ export function buildProbeSource(command: string): string {
     + '$t=$null;$e=$null;'
     + '$a=[System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e);'
     + `'${PROBE_ERRORS} '+@($e).Count;`
-    + `'${PROBE_LINES} '+(($a.EndBlock.Statements|ForEach-Object{$_.Extent.StartLineNumber}) -join ',')`
+    + `'${PROBE_STATEMENTS} '+(($a.EndBlock.Statements|ForEach-Object{''+$_.Extent.StartLineNumber+':'+$_.Extent.StartColumnNumber+':'+$_.Extent.EndLineNumber+':'+$_.Extent.EndColumnNumber}) -join ',')`
 }
 
 /**
@@ -106,7 +124,7 @@ export function buildProbeSource(command: string): string {
 export function parseProbeOutput(stdout: string): ProbeAnswer | undefined {
   const text = stdout.replace(/^\uFEFF/, '')
   let errors: number | undefined
-  let lines: readonly number[] | undefined
+  let statements: readonly StatementExtent[] | undefined
   for (const rawLine of text.split(/\r\n|\n|\r/)) {
     const line = rawLine.trim()
     // `ERRORS` without a count is malformed on purpose-checked: an absent count
@@ -117,34 +135,37 @@ export function parseProbeOutput(stdout: string): ProbeAnswer | undefined {
       errors = count
       continue
     }
-    if (line === PROBE_LINES || line.startsWith(`${PROBE_LINES} `)) {
-      const parsed = parseLineNumbers(line.slice(PROBE_LINES.length).trim())
+    if (line === PROBE_STATEMENTS || line.startsWith(`${PROBE_STATEMENTS} `)) {
+      const parsed = parseStatementExtents(line.slice(PROBE_STATEMENTS.length).trim())
       if (parsed === undefined) return undefined
-      lines = parsed
+      statements = parsed
     }
   }
   if (errors === undefined) return undefined
   // THE TRAP: a broken script still yields a populated statement list, so the
-  // count decides. `LINES` is present and deliberately not looked at.
+  // count decides. `STATEMENTS` is present and deliberately not looked at.
   if (errors > 0) return { kind: 'errors', count: errors }
-  return lines === undefined ? undefined : { kind: 'lines', lines }
+  return statements === undefined ? undefined : { kind: 'statements', statements }
 }
 
 /**
- * Parse a comma-separated line-number list, rejecting anything that is not a
- * 1-based integer. An empty list is legal: a script can have no statements.
- * @param text - the text after the `LINES` prefix.
- * @returns the numbers, or undefined when a token is not a line number.
+ * Parse the comma-separated `line:column:line:column` extent list.
+ * An empty list is legal: a script can have no statements.
+ * @param text - the text after the `STATEMENTS` prefix.
+ * @returns the extents, or undefined when a token is malformed.
  */
-function parseLineNumbers(text: string): readonly number[] | undefined {
+function parseStatementExtents(text: string): readonly StatementExtent[] | undefined {
   if (text.length === 0) return []
-  const numbers: number[] = []
+  const statements: StatementExtent[] = []
   for (const token of text.split(',')) {
-    const value = Number(token.trim())
-    if (!Number.isInteger(value) || value < 1) return undefined
-    numbers.push(value)
+    const parts = token.trim().split(':')
+    if (parts.length !== 4) return undefined
+    const numbers = parts.map((part) => Number(part))
+    if (numbers.some((value) => !Number.isInteger(value) || value < 1)) return undefined
+    const [startLine, startColumn, endLine, endColumn] = numbers as [number, number, number, number]
+    statements.push({ startLine, startColumn, endLine, endColumn })
   }
-  return numbers
+  return statements
 }
 
 /**
@@ -160,6 +181,69 @@ function parseLineNumbers(text: string): readonly number[] | undefined {
  * @returns the steps, in source order.
  */
 export { stepsAtLines }
+
+/**
+ * Turn the parser's statement extents into this plugin's steps.
+ *
+ * TWO RULES, both from the parser and neither guessed:
+ *
+ * - A boundary is a STEP only when the text between two statements is a separator a marker
+ *   may be inserted at: a `;` (optionally followed by a newline) or bare whitespace/newlines.
+ *   Anything else — `&&`/`||`, or whatever else the parser produced — MERGES the two
+ *   statements into one step, so they run under one marker.
+ * - A step's text is sliced from its OWN extent, so every character inside a step is the
+ *   user's. Extents arrive as 1-based line/column and are converted to offsets here.
+ * @param source - the command text, exactly as it will be executed.
+ * @param statements - the parser's top-level statements, in source order.
+ * @returns the steps, each with its text, line and character span.
+ */
+export function stepsFromStatements(source: string, statements: readonly StatementExtent[]): readonly Step[] {
+  const lineStarts = [0]
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '\n') lineStarts.push(index + 1)
+  }
+  const offsetOf = (line: number, column: number): number | undefined => {
+    const base = lineStarts[line - 1]
+    return base === undefined ? undefined : base + (column - 1)
+  }
+  const steps: Step[] = []
+  for (const statement of statements) {
+    const start = offsetOf(statement.startLine, statement.startColumn)
+    const end = offsetOf(statement.endLine, statement.endColumn)
+    if (start === undefined || end === undefined || end <= start) continue
+    const previous = steps.at(-1)
+    if (previous === undefined) {
+      steps.push({ line: statement.startLine, text: source.slice(start, end), start, end })
+      continue
+    }
+    if (splitsAt(source.slice(previous.end ?? 0, start))) {
+      steps.push({ line: statement.startLine, text: source.slice(start, end), start, end })
+    } else if (previous.start !== undefined) {
+      // No marker can be inserted there without changing the chain, so the pair is one step.
+      steps[steps.length - 1] = {
+        line: previous.line,
+        text: source.slice(previous.start, end),
+        start: previous.start,
+        end,
+      }
+    }
+  }
+  // The marker id: a step INDEX, because two statements can share one line.
+  return steps.map((step, index) => ({ ...step, anchor: index + 1 }))
+}
+
+/**
+ * Whether the text between two statements is a boundary a marker may be inserted at.
+ * @param gap - the source text between the previous statement's end and this one's start.
+ * @returns whether the two statements are separate steps.
+ */
+function splitsAt(gap: string): boolean {
+  const trimmed = gap.trim()
+  // Whitespace and newlines only: PowerShell accepts a newline wherever a `;` is legal.
+  if (trimmed === '') return true
+  // The one separator a marker can follow without changing the chain's meaning.
+  return trimmed === ';'
+}
 
 /** Options for {@link planPwshSteps}, all of them test seams. */
 export interface PlanOptions {
@@ -207,20 +291,19 @@ async function runProbe(executable: string, source: string, timeoutMs: number): 
 /**
  * The authoritative, parse-based plan for one PowerShell command.
  *
- * The probe is skipped when it cannot change the outcome — a single-line
- * command, whose split is already correct, and a command the heuristic already
- * refuses, which is never instrumented either way — and returns undefined
- * whenever the shell cannot be resolved, the probe cannot run, or its output
- * cannot be trusted. The caller then uses `./split.ts`.
+ * The parser is asked about the ORIGINAL text, and its statement extents are the only
+ * source of boundaries — including a one-line `a; b; c`, whose statements share a line and
+ * which no line-based rule could split. The probe is skipped when it cannot change the
+ * answer (a command with no `;` and no newline is one statement by definition) and returns
+ * undefined whenever the shell cannot be resolved, the probe cannot run, or its output
+ * cannot be trusted; the caller then refuses to instrument rather than guessing.
  * @param command - the command text, exactly as it will be executed.
  * @param options - test seams; production passes nothing.
  * @returns the plan, or undefined when there is no authoritative answer.
  */
 export async function planPwshSteps(command: string, options: PlanOptions = {}): Promise<SplitResult | undefined> {
-  const heuristic = splitSteps(command)
-  // Parsing a command we will not instrument buys nothing but a process spawn.
-  if (!heuristic.safe) return undefined
-  if (!/[\r\n]/.test(command)) return undefined
+  // Nothing to decide: one line with no statement separator is one statement.
+  if (!/[;\r\n]/.test(command)) return undefined
   const executable = options.executable ?? resolvePowershell(options.env ?? process.env, options.platform ?? process.platform)
   if (executable === undefined) return undefined
   const probe = buildProbeSource(command)
@@ -234,10 +317,12 @@ export async function planPwshSteps(command: string, options: PlanOptions = {}):
       // The heuristic's steps are kept for the CARD: it draws a degraded,
       // uninstrumented step list, and a zero-step list would read as a
       // single-line command instead of a refused one.
-      steps: heuristic.steps,
+      steps: splitSteps(command).steps,
       safe: false,
       reason: `PowerShell reported ${answer.count} syntax error${answer.count === 1 ? '' : 's'} in this command`,
     }
   }
-  return { steps: stepsAtLines(command, answer.lines), safe: true }
+  const steps = stepsFromStatements(command, answer.statements)
+  if (steps.length === 0) return undefined
+  return { steps, safe: true }
 }

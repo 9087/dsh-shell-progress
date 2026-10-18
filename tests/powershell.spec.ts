@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createNonce, instrument, markerPattern, stripMarkers } from '../src/instrument.ts'
 import { splitSteps } from '../src/split.ts'
-import { normalizeStatements } from '../src/statements.ts'
+import { planPwshSteps } from '../src/pwshtree.ts'
 import { resolvePowershell } from './powershell-path.ts'
 
 interface Run {
@@ -266,33 +266,79 @@ describe.skipIf(!available)('the marker stays out of the command\'s own data', (
   })
 })
 
-describe.skipIf(!available)('a one-line `;` chain, split into statements', () => {
+describe.skipIf(!available)('a one-line `;` chain, split by the parser', () => {
   /** One chain exercising an assignment, a failure, and output on both sides of it. */
   const CHAIN = "Write-Output alpha; $v = 41; Write-Output ($v + 1); cmd.exe /c exit 3; Write-Output 'after the failure'"
 
+  it('plans one step per statement, each with its own text', async () => {
+    const plan = await planPwshSteps(CHAIN, { executable: POWERSHELL, platform: 'win32' })
+    expect(plan?.safe).toBe(true)
+    expect(plan?.steps.map((step) => step.text)).toEqual([
+      'Write-Output alpha',
+      '$v = 41',
+      'Write-Output ($v + 1)',
+      'cmd.exe /c exit 3',
+      "Write-Output 'after the failure'",
+    ])
+    // The marker ids are step indices: every statement here shares line 1.
+    expect(plan?.steps.map((step) => step.anchor)).toEqual([1, 2, 3, 4, 5])
+    expect(plan?.steps.every((step) => step.line === 1)).toBe(true)
+  })
+
   it('runs byte-identically to the plain command, with the same exit code', async () => {
-    // THE CLAIM THIS FEATURE STANDS ON: rewriting `;` to newlines is semantically neutral,
-    // and the inlined markers keep `$?` as the plain command sees it. Measured against a real
-    // shell, not reasoned about.
+    // THE CLAIM THIS FEATURE STANDS ON: inserting markers between statements is semantically
+    // neutral, and the inlined marker keeps `$?` as the plain command sees it. Measured
+    // against a real shell, not reasoned about.
+    const plan = await planPwshSteps(CHAIN, { executable: POWERSHELL, platform: 'win32' })
+    if (plan === undefined) throw new Error('the chain must plan')
     const plain = await pwsh(CHAIN)
-    const normalized = normalizeStatements(CHAIN)
-    expect(normalized, 'the chain must normalize').toBeDefined()
-    const source = normalized?.text ?? ''
-    const steps = source.split('\n').map((text, index) => ({ line: index + 1, text }))
     const nonce = createNonce()
-    const marked = await pwsh(instrument(source, steps, nonce))
+    const marked = await pwsh(instrument(CHAIN, plan.steps, nonce))
     const normalise = (text: string): string => stripMarkers(text, nonce).replace(/\r\n/g, '\n').trimEnd()
     expect(normalise(marked.stdout), 'the instrumented output differs from the plain one').toBe(normalise(plain.stdout))
     expect(marked.code, 'the exit code differs').toBe(plain.code)
+    expect(markerCount(marked.stdout, nonce)).toBe(plan.steps.length)
   })
 
-  it('announces one step per statement', async () => {
-    const normalized = normalizeStatements(CHAIN)
-    const source = normalized?.text ?? ''
-    const steps = source.split('\n').map((text, index) => ({ line: index + 1, text }))
+  it('slices statements correctly when the command holds astral characters', async () => {
+    // The parser reports 1-based UTF-16 COLUMNS; this plugin slices by JS string offsets.
+    // Those agree for BMP text, and this is the case that would catch a disagreement: an
+    // emoji is one code POINT but two UTF-16 code units, so a column/offset mismatch shows
+    // up here as a step text split through the middle of a character.
+    const command = "Write-Output '🚀 launch'; Write-Output '✅ done'; Write-Output 'plain'"
+    const plan = await planPwshSteps(command, { executable: POWERSHELL, platform: 'win32' })
+    if (plan === undefined) throw new Error('the chain must plan')
+    expect(plan.steps.map((step) => step.text)).toEqual([
+      "Write-Output '🚀 launch'",
+      "Write-Output '✅ done'",
+      'Write-Output \'plain\'',
+    ])
+    const plain = await pwsh(command)
     const nonce = createNonce()
-    const run = await pwsh(instrument(source, steps, nonce))
-    expect(markerCount(run.stdout, nonce)).toBe(steps.length)
-    expect(steps).toHaveLength(5)
+    const marked = await pwsh(instrument(command, plan.steps, nonce))
+    expect(stripMarkers(marked.stdout, nonce)).toBe(plain.stdout)
+    expect(marked.code).toBe(plain.code)
+    expect(markerCount(marked.stdout, nonce)).toBe(plan.steps.length)
+  })
+
+  it('slices statements correctly in a CRLF command', async () => {
+    // Real Windows command templates use CRLF. The offset table is built on `\n`, and a
+    // column that lands at a line end must not swallow the `\r` — which would put a stray
+    // carriage return into a step's text (and the card).
+    const command = 'Write-Output a; Write-Output b\r\nWrite-Output c; Write-Output d'
+    const plan = await planPwshSteps(command, { executable: POWERSHELL, platform: 'win32' })
+    if (plan === undefined) throw new Error('the chain must plan')
+    expect(plan.steps.map((step) => step.text)).toEqual([
+      'Write-Output a',
+      'Write-Output b',
+      'Write-Output c',
+      'Write-Output d',
+    ])
+    const plain = await pwsh(command)
+    const nonce = createNonce()
+    const marked = await pwsh(instrument(command, plan.steps, nonce))
+    expect(stripMarkers(marked.stdout, nonce)).toBe(plain.stdout)
+    expect(marked.code).toBe(plain.code)
+    expect(markerCount(marked.stdout, nonce)).toBe(plan.steps.length)
   })
 })

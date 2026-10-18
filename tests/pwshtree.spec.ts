@@ -30,7 +30,9 @@ import {
   parseProbeOutput,
   planPwshSteps,
   stepsAtLines,
+  stepsFromStatements,
 } from '../src/pwshtree.ts'
+import type { StatementExtent } from '../src/pwshtree.ts'
 import { splitSteps } from '../src/split.ts'
 import type { Step } from '../src/split.ts'
 
@@ -120,13 +122,21 @@ const OVERSIZED = Array.from(
   (_, index) => `Write-Output '${index}-${'x'.repeat(980)}'`,
 ).join('\n')
 
+/** One statement extent, for the fixtures below. */
+function extent(startLine: number, startColumn: number, endLine: number, endColumn: number): StatementExtent {
+  return { startLine, startColumn, endLine, endColumn }
+}
+
 describe('parseProbeOutput', () => {
-  it('reads the top-level statement lines from a clean probe', () => {
-    expect(parseProbeOutput('ERRORS 0\nLINES 1,2,8\n')).toEqual({ kind: 'lines', lines: [1, 2, 8] })
+  it('reads the top-level statement extents from a clean probe', () => {
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS 1:1:1:19,1:21:1:38,2:1:2:9\n')).toEqual({
+      kind: 'statements',
+      statements: [extent(1, 1, 1, 19), extent(1, 21, 1, 38), extent(2, 1, 2, 9)],
+    })
   })
 
   it('reads an empty statement list', () => {
-    expect(parseProbeOutput('ERRORS 0\nLINES ')).toEqual({ kind: 'lines', lines: [] })
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS ')).toEqual({ kind: 'statements', statements: [] })
   })
 
   it('REFUSES a populated statement list when the parser reported errors', () => {
@@ -134,34 +144,78 @@ describe('parseProbeOutput', () => {
     // probe prints both lines; the error count is the only thing that may be
     // believed. If this ever returns a plan, instrumentation goes into a
     // command that is already broken.
-    expect(parseProbeOutput('ERRORS 1\nLINES 1,2\n')).toEqual({ kind: 'errors', count: 1 })
-    expect(parseProbeOutput('ERRORS 3\nLINES 1,1,2')).toEqual({ kind: 'errors', count: 3 })
+    expect(parseProbeOutput('ERRORS 1\nSTATEMENTS 1:1:1:19\n')).toEqual({ kind: 'errors', count: 1 })
+    expect(parseProbeOutput('ERRORS 3\nSTATEMENTS 1:1:1:9,2:1:2:9')).toEqual({ kind: 'errors', count: 3 })
   })
 
   it('refuses output with no error count at all', () => {
     // Without the count there is no way to know whether the statement list
     // came from a script that parsed, so there is no answer to give.
-    expect(parseProbeOutput('LINES 1,2')).toBeUndefined()
+    expect(parseProbeOutput('STATEMENTS 1:1:1:9')).toBeUndefined()
     expect(parseProbeOutput('ERRORS')).toBeUndefined()
     expect(parseProbeOutput('')).toBeUndefined()
   })
 
-  it('refuses malformed counts and line numbers', () => {
-    expect(parseProbeOutput('ERRORS nope\nLINES 1')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS -1\nLINES 1')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS 0\nLINES 0')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS 0\nLINES 1,x')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS 0\nLINES 1.5')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS 0\nLINES ,')).toBeUndefined()
+  it('refuses malformed counts and extents', () => {
+    expect(parseProbeOutput('ERRORS nope\nSTATEMENTS 1:1:1:9')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS -1\nSTATEMENTS 1:1:1:9')).toBeUndefined()
+    // A zero line, a missing field, a non-number and an empty statement all fail: a
+    // boundary this parser cannot place is never bracketed by a guess.
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS 0:1:1:9')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS 1:1:1')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS 1:1:1:x')).toBeUndefined()
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS ,')).toBeUndefined()
   })
 
   it('refuses output that is not a verdict, however shell-ish it looks', () => {
     expect(parseProbeOutput('At line:1 char:1\n+ ...\nMissingEndCurlyBrace')).toBeUndefined()
-    expect(parseProbeOutput('ERRORS 0\nLINES 1\nextra noise')).toEqual({ kind: 'lines', lines: [1] })
+    expect(parseProbeOutput('ERRORS 0\nSTATEMENTS 1:1:1:9\nextra noise')).toEqual({
+      kind: 'statements',
+      statements: [extent(1, 1, 1, 9)],
+    })
   })
 
   it('tolerates CRLF and a byte-order mark', () => {
-    expect(parseProbeOutput('\uFEFFERRORS 0\r\nLINES 1,2\r\n')).toEqual({ kind: 'lines', lines: [1, 2] })
+    expect(parseProbeOutput('\uFEFFERRORS 0\r\nSTATEMENTS 1:1:1:9,2:1:2:9\r\n')).toEqual({
+      kind: 'statements',
+      statements: [extent(1, 1, 1, 9), extent(2, 1, 2, 9)],
+    })
+  })
+})
+
+describe('stepsFromStatements', () => {
+  it('splits a one-line `;` chain into one step per statement, each with its own text', () => {
+    const source = "Write-Output 'one'; Write-Output 'two'; Write-Output 'three'"
+    const parts = ["Write-Output 'one'", "Write-Output 'two'", "Write-Output 'three'"]
+    // Stand-ins for what the parser reports: each statement's own line/column span.
+    const statements = parts.map((part) => {
+      const start = source.indexOf(part)
+      return extent(1, start + 1, 1, start + part.length + 1)
+    })
+    const steps = stepsFromStatements(source, statements)
+    expect(steps.map((step) => step.text)).toEqual(parts)
+    expect(steps.map((step) => step.line)).toEqual([1, 1, 1])
+    // The marker id is the step INDEX: a line number would not identify one of these.
+    expect(steps.map((step) => step.anchor)).toEqual([1, 2, 3])
+    expect(steps.map((step) => step.start)).toEqual(parts.map((part) => source.indexOf(part)))
+  })
+
+  it('keeps a multi-line block as ONE step and texts it verbatim', () => {
+    const source = ['if ($true) {', '  Write-Output 1', '}', 'Write-Output 2'].join('\n')
+    const block = source.slice(0, source.indexOf('\nWrite-Output 2'))
+    const steps = stepsFromStatements(source, [extent(1, 1, 3, 2), extent(4, 1, 4, 15)])
+    expect(steps.map((step) => step.line)).toEqual([1, 4])
+    expect(steps[0]?.text).toBe(block)
+    expect(steps[1]?.text).toBe('Write-Output 2')
+  })
+
+  it('MERGES two statements the plugin cannot put a marker between', () => {
+    // Only a `;` (or a newline) is a separator a marker may follow. Anything else keeps
+    // the statements in one step, so no marker ever lands inside a chain.
+    const source = 'Write-Output a && Write-Output b'
+    const steps = stepsFromStatements(source, [extent(1, 1, 1, 16), extent(1, 20, 1, 35)])
+    expect(steps).toHaveLength(1)
+    expect(steps[0]?.text).toBe(source)
   })
 })
 
@@ -205,11 +259,6 @@ describe('planPwshSteps does not spawn when it cannot help', () => {
     expect(await planPwshSteps("Write-Output 'one'")).toBeUndefined()
   })
 
-  it('skips a command the heuristic already refuses', async () => {
-    expect(splitSteps(UNCLOSED_BRACE).safe).toBe(false)
-    expect(await planPwshSteps(UNCLOSED_BRACE)).toBeUndefined()
-  })
-
   it('gives no plan when no PowerShell can be resolved', async () => {
     // Two ways to have no shell, and neither may fall back to a guess.
     //
@@ -232,10 +281,31 @@ const probe = await shell("Write-Output 'ready'")
 const available = probe.stdout.trim() === 'ready'
 
 describe.skipIf(!available)('the planner, against a real PowerShell', () => {
-  const cases: readonly { readonly name: string; readonly command: string; readonly lines: readonly number[] }[] = [
-    { name: 'the full if/else is ONE statement', command: IF_ELSE, lines: [1, 2, 8] },
-    { name: 'the full try/catch is ONE statement', command: TRY_CATCH, lines: [1, 6] },
-    { name: 'the full do/while is ONE statement', command: DO_WHILE, lines: [1, 2, 6] },
+  const cases: readonly {
+    readonly name: string
+    readonly command: string
+    readonly lines: readonly number[]
+    readonly texts: readonly string[]
+  }[] = [
+    {
+      name: 'the full if/else is ONE statement',
+      command: IF_ELSE,
+      lines: [1, 2, 8],
+      // The parser's own spans: the if/else is ONE statement however many lines it covers.
+      texts: ['cmd.exe /c exit 3', IF_ELSE.split('\n').slice(1, 7).join('\n'), 'Write-Output "done"'],
+    },
+    {
+      name: 'the full try/catch is ONE statement',
+      command: TRY_CATCH,
+      lines: [1, 6],
+      texts: [TRY_CATCH.split('\n').slice(0, 5).join('\n'), 'Write-Output "done"'],
+    },
+    {
+      name: 'the full do/while is ONE statement',
+      command: DO_WHILE,
+      lines: [1, 2, 6],
+      texts: ['$i = 0', DO_WHILE.split('\n').slice(1, 5).join('\n'), 'Write-Output "i=$i"'],
+    },
   ]
 
   for (const entry of cases) {
@@ -243,10 +313,9 @@ describe.skipIf(!available)('the planner, against a real PowerShell', () => {
       const plan = await planPwshSteps(entry.command, { executable: POWERSHELL })
       expect(plan?.safe).toBe(true)
       expect(plan?.steps.map((step) => step.line)).toEqual(entry.lines)
-      // Each step's text is its own source line, unchanged.
-      for (const step of plan?.steps ?? []) {
-        expect(step.text).toBe(entry.command.split('\n')[step.line - 1])
-      }
+      // Each step's text is its own STATEMENT, verbatim: a block keeps its body, and every
+      // character in the step came from the user's command.
+      expect(plan?.steps.map((step) => step.text)).toEqual(entry.texts)
     })
   }
 
@@ -277,6 +346,15 @@ describe.skipIf(!available)('the planner, against a real PowerShell', () => {
     expect(plan?.reason).toMatch(/syntax error/)
   })
 
+  it('asks the probe even when the heuristic refuses, and the probe refuses too', async () => {
+    // The brace counter refuses this (an unclosed block), but the PARSER is the authority
+    // now — and it reports errors, so the plan is a refusal either way.
+    expect(splitSteps(UNCLOSED_BRACE).safe).toBe(false)
+    const plan = await planPwshSteps(UNCLOSED_BRACE, { executable: POWERSHELL })
+    expect(plan?.safe).toBe(false)
+    expect(plan?.reason).toMatch(/syntax error/)
+  })
+
   it('sees the trap on a real shell: errors AND a populated statement list', async () => {
     // The measured fact behind the gate, taken from the real probe rather than
     // asserted in prose. The parser answers with a best-effort tree — `LINES`
@@ -291,7 +369,7 @@ describe.skipIf(!available)('the planner, against a real PowerShell', () => {
       )
     })
     expect(stdout).toMatch(/ERRORS [1-9]\d*/)
-    expect(stdout).toMatch(/LINES 1/)
+    expect(stdout).toMatch(/STATEMENTS 1:/)
     expect(parseProbeOutput(stdout)?.kind).toBe('errors')
   })
 
