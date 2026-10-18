@@ -491,9 +491,12 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // so neither the marker column nor one character of the command can move.
     expect(css, 'the dot does not grow on hover').toContain('transform:scale(1.5)')
     expect(dotBody, 'a transform sits in the dot\'s resting state, not only on hover').not.toContain('transform:')
-    // The hover FILL is gone — in both themes, which means the theme's interactive
-    // fill token is gone from this plugin's stylesheets entirely.
-    expect(css, 'the row still paints the theme\'s hover fill').not.toContain('--dsw-alias-interactive-bg-hover')
+    // The hover FILL is gone from the CARD. The settings page's switch legitimately uses the
+    // theme's interactive fill (it is copied from the shell's own controls), so the claim is
+    // scoped: the token may appear only in a `_switch` rule, never in a card/row/segment one.
+    const hoverFillUsers = [...css.matchAll(/\.([A-Za-z0-9_-]+)_([A-Za-z0-9_-]+)[^{}]*\{[^{}]*--dsw-alias-interactive-bg-hover[^{}]*\}/gu)]
+      .map((match) => match[2])
+    expect(hoverFillUsers.slice().sort(), 'a card rule paints the theme\'s hover fill').toEqual(['switch'])
     // A command line still WAITING its turn is not faded either: the pending state is the
     // dot's colour and the bar's segment, and the text is not a state indicator. The rule
     // that dimmed it is gone from the shipped stylesheet, which is the half a browser

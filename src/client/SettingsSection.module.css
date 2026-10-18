@@ -2,11 +2,17 @@
  *
  * Colours come from the shell's own tokens, not from literals, so the page follows the theme
  * and matches the rows the shell itself contributes. The fallbacks exist only for a host that
- * renders this component without its theme attached. */
+ * renders this component without its theme attached.
+ *
+ * THE SWITCH IS COPIED FROM `dsh-diff-approval`'s settings toggle on purpose: both plugins
+ * put a control on the same page, and two different-looking switches next to each other read
+ * as two different systems. Geometry, borders, hover/focus treatment and the on-state fill
+ * are that component's, with this host's token names as the source and plain fallbacks for a
+ * host that renders the row without a theme. */
 
 .row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 10px 0;
@@ -30,38 +36,52 @@
   line-height: 1.5;
 }
 
-/* A pill whose knob moves. Off is the quiet track; on is the system's own accent — the same
- * token the bar's single-fill shape paints with, so "on" means the same thing in both places. */
+/* A track pill with a sliding thumb. Off is a bordered, empty track; on is the brand-blue
+ * fill, so "active" reads without the accent being loud. */
 .switch {
   position: relative;
   flex: 0 0 auto;
-  width: 34px;
-  height: 20px;
+  width: 60px;
+  height: 36px;
   padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background-color: var(--dsw-alias-bg-skeleton, rgba(128, 128, 128, 0.35));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  border-radius: 18px;
+  background: transparent;
   cursor: pointer;
-  transition: background-color 120ms ease-out;
+}
+
+.switch:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12));
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary, #4176e6);
+  outline-offset: 2px;
 }
 
 .switch[data-enabled='true'] {
-  background-color: var(--dsw-alias-state-business-primary, #4176e6);
+  border-color: var(--dsw-alias-state-business-primary, #4176e6);
+  background: var(--dsw-alias-state-business-primary, #4176e6);
+}
+
+.switch[data-enabled='true']:hover {
+  background: var(--dsw-alias-state-business-primary, #4176e6);
 }
 
 .knob {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 14px;
-  height: 14px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background-color: #fff;
-  transition: transform 120ms ease-out;
+  background: var(--dsw-alias-label-primary, rgba(255, 255, 255, 0.92));
+  transition: left 120ms ease, background-color 120ms ease;
 }
 
 .switch[data-enabled='true'] .knob {
-  transform: translateX(14px);
+  left: 27px;
+  background: #fff;
 }
 
 @media (prefers-reduced-motion: reduce) {
