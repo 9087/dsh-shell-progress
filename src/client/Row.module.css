@@ -238,3 +238,14 @@
   color: var(--dsw-alias-label-caption, inherit);
   font-size: var(--dsh-content-font-size-secondary, 13px);
 }
+
+/* The command's TOTAL time, sitting beside the description in the shell's header row. The
+ * caption colour and tabular figures are the per-step clocks' own, so the header and the
+ * step list read as one family; `nowrap` keeps a minute-scale total on the row. */
+.total {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, inherit);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

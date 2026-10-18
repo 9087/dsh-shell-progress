@@ -1276,6 +1276,12 @@ test.describe('the shell_progress card in a real shell', () => {
       `the live bar is not partly filled: ${JSON.stringify(liveState.phases)}`,
     ).toBeGreaterThanOrEqual(1)
     expect(liveState.phases.filter((phase) => phase === 'running')).toHaveLength(1)
+    // The header states the command's TOTAL time: live while it runs, and in the same
+    // units as the step clocks beside it.
+    await expect(
+      live.locator('[data-total]').first(),
+      'the live card does not state the command total',
+    ).toHaveText(/^(?:\d+s|\d+m \d{2}s)$/u, { timeout: 10_000 })
     // The opened card carries each step's OWN command line, the finished ones included,
     // and the clock of the step in flight.
     expect(liveState.text, 'the live card does not show its steps').toContain('(Get-Date)')

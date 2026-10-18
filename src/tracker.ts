@@ -118,6 +118,27 @@ export class StepTracker {
   }
 
   /**
+   * Wall-clock milliseconds from the first step that started to the last that ended, or to
+   * `at` while one is still running.
+   *
+   * NOT the sum of the steps' durations: the gaps between steps belong to the command, and
+   * the card's total must include them. 0 before any step has started.
+   * @param at - a reading from the same monotonic clock.
+   * @returns the total elapsed time.
+   */
+  totalElapsed(at: number): number {
+    let first: number | undefined
+    let last = 0
+    for (const state of this.states) {
+      if (state.startedAt === null) continue
+      if (first === undefined || state.startedAt < first) first = state.startedAt
+      const end = state.endedAt ?? at
+      if (end > last) last = end
+    }
+    return first === undefined ? 0 : Math.max(0, last - first)
+  }
+
+  /**
    * Milliseconds the current step has been running.
    * @param at - a reading from the same monotonic clock.
    * @returns the elapsed time, frozen once the step has settled; 0 when no step has started.

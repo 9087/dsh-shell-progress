@@ -93,6 +93,7 @@ export function emptySnapshot(): LiveSnapshot {
     currentStep: null,
     total: 0,
     elapsedMs: 0,
+    totalElapsedMs: 0,
     preamble: '',
     steps: [],
   }
@@ -126,7 +127,8 @@ function stepOf(value: unknown): StepProgress | undefined {
   }
 }
 
-/** Narrow the snapshot value; a value that is not a snapshot at all is `undefined`. */export function snapshotOf(value: unknown): LiveSnapshot | undefined {
+/** Narrow the snapshot value; a value that is not a snapshot at all is `undefined`. */
+export function snapshotOf(value: unknown): LiveSnapshot | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   // A well-formed "I have no record of this call" is USABLE information, distinct
@@ -142,6 +144,7 @@ function stepOf(value: unknown): StepProgress | undefined {
   const current = record.current
   const currentStep = record.currentStep
   const elapsed = record.elapsedMs
+  const totalElapsed = record.totalElapsedMs
   const total = record.total
   return {
     found: true,
@@ -156,6 +159,9 @@ function stepOf(value: unknown): StepProgress | undefined {
       : {},
     total: typeof total === 'number' && Number.isFinite(total) ? total : steps.length,
     elapsedMs: typeof elapsed === 'number' && Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0,
+    ...typeof totalElapsed === 'number' && Number.isFinite(totalElapsed) && totalElapsed > 0
+      ? { totalElapsedMs: totalElapsed }
+      : {},
     preamble: typeof record.preamble === 'string' ? record.preamble : '',
     steps,
   }

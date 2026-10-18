@@ -3,6 +3,7 @@ import {
   argsOf,
   barShape,
   durationTone,
+  formatTotal,
   isErrorBlock,
   isSettledBlock,
   metaOf,
@@ -10,6 +11,7 @@ import {
   viewFromSettled,
   withNotes,
 } from '../src/client/model.ts'
+import { emptySnapshot } from '../src/client/port.ts'
 import type { LiveSnapshot, ShellProgressMeta } from '../src/types.ts'
 
 // There is deliberately NO multi-line command fixture here any more: the client
@@ -398,5 +400,44 @@ describe('withNotes', () => {
   it('returns the SAME object when the answer adds nothing', () => {
     const view = bare()
     expect(withNotes(view, [undefined, undefined])).toBe(view)
+  })
+})
+
+describe('the command total', () => {
+  it('formats seconds, and minutes past a minute', () => {
+    expect(formatTotal(0)).toBe('0s')
+    expect(formatTotal(12_400)).toBe('12s')
+    expect(formatTotal(65_000)).toBe('1m 05s')
+    expect(formatTotal(3_600_000)).toBe('60m 00s')
+    expect(formatTotal(-5)).toBe('0s')
+  })
+
+  it('carries the settled total from the record to the header', () => {
+    // The narrowing in `metaOf` is field by field: a field it forgets is silently lost, and
+    // the header would show no total on every reloaded card.
+    const view = viewFromSettled({
+      v: 1,
+      instrumented: true,
+      refused: false,
+      partial: false,
+      preamble: '',
+      elapsedMs: 4_321,
+      steps: [
+        { line: 1, text: 'a', output: '', startedAt: 0, endedAt: 1 },
+        { line: 2, text: 'b', output: '', startedAt: 2, endedAt: 3 },
+      ],
+    }, false)
+    expect(view.totalElapsedMs).toBe(4_321)
+    expect(metaOf({
+      kind: 'tool-result',
+      meta: { steps: [{ line: 1, text: 'a', output: '', startedAt: 0, endedAt: 1 }], elapsedMs: 7_000 },
+    })?.elapsedMs).toBe(7_000)
+  })
+
+  it('carries the live total through, and reads a missing one as zero', () => {
+    const view = viewFromLive({ ...emptySnapshot(), found: true, totalElapsedMs: 2_500 })
+    expect(view.totalElapsedMs).toBe(2_500)
+    // Nothing known yet: the header must not claim a total of zero seconds.
+    expect(viewFromLive(undefined).totalElapsedMs).toBe(0)
   })
 })

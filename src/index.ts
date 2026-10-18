@@ -371,6 +371,8 @@ const OUTPUT_SCHEMA = {
         },
         // TEMPORARY DIAGNOSTIC (see `NotesState`): 'ok' or the reason no note was written.
         notesState: { type: 'string' },
+        // Wall-clock time of the whole command (see `ShellProgressMeta.elapsedMs`).
+        elapsedMs: { type: 'number' },
         partial: { type: 'boolean', required: true },
         preamble: { type: 'string', required: true },
         steps: {
@@ -559,6 +561,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         currentStep: null,
         total: 0,
         elapsedMs: 0,
+        totalElapsedMs: 0,
         preamble: '',
         steps: [],
       }
@@ -574,6 +577,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       currentStep: entry.tracker.currentStep(),
       total: entry.steps.length,
       elapsedMs: entry.tracker.elapsed(performance.now()),
+      totalElapsedMs: entry.tracker.totalElapsed(performance.now()),
       preamble: entry.tracker.preamble(),
       steps: entry.tracker.steps(),
     }
@@ -858,6 +862,10 @@ export function apply(ctx: Context, config: Config = {}): void {
           ...refused && refusal !== undefined ? { refusedReason: refusal.code } : {},
           ...cardNotesRoute === undefined ? {} : { notesRoute: cardNotesRoute },
           ...cardNotesState === undefined ? {} : { notesState: cardNotesState },
+          ...(() => {
+            const elapsedMs = entry.tracker.totalElapsed(performance.now())
+            return elapsedMs > 0 ? { elapsedMs } : {}
+          })(),
           partial: lossy || entry.tracker.droppedOutput(),
           preamble: entry.tracker.preamble(),
           // The canonical value is validated against the output schema, which

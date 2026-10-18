@@ -174,3 +174,28 @@ describe('StepTracker output budget', () => {
     expect(tracker.droppedOutput()).toBe(false)
   })
 })
+
+describe('totalElapsed', () => {
+  it('measures first start to last end, gaps included', () => {
+    // Not the sum of the steps' durations: the gaps between steps belong to the command.
+    let now = 0
+    const tracker = new StepTracker([{ line: 1, text: 'a' }, { line: 2, text: 'b' }], { now: () => now })
+    expect(tracker.totalElapsed(0)).toBe(0)
+    now = 100
+    tracker.observe({ kind: 'marker', line: 1 })
+    now = 150
+    tracker.observe({ kind: 'marker', line: 2 })
+    now = 400
+    tracker.settle()
+    // Step one 100..150, step two 150..400: the wall clock is 300ms.
+    expect(tracker.totalElapsed(now)).toBe(300)
+  })
+
+  it('keeps counting on the running step', () => {
+    let now = 0
+    const tracker = new StepTracker([{ line: 1, text: 'a' }, { line: 2, text: 'b' }], { now: () => now })
+    now = 10
+    tracker.observe({ kind: 'marker', line: 1 })
+    expect(tracker.totalElapsed(1_000)).toBe(990)
+  })
+})

@@ -167,6 +167,12 @@ export interface ShellProgressMeta {
   readonly notesState?: NotesState
   /** True when the consumed stream lost bytes, so attribution may be incomplete. */
   readonly partial: boolean
+  /**
+   * Wall-clock milliseconds the whole command took: the first step's start to the last
+   * step's end, gaps included. Absent on a record written before this field existed, and on
+   * a command whose steps never started.
+   */
+  readonly elapsedMs?: number
   /** Output produced before the first step's marker. Usually empty. */
   readonly preamble: string
   /**
@@ -208,6 +214,8 @@ export interface LiveSnapshot {
   readonly total: number
   /** Milliseconds the current step has been running; 0 when no step has started. */
   readonly elapsedMs: number
+  /** Wall-clock milliseconds since the first step started; 0 before the first marker. */
+  readonly totalElapsedMs?: number
   /** Output produced before the first step's marker. */
   readonly preamble: string
   /** Steps with everything observed so far. */

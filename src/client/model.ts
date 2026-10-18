@@ -161,6 +161,11 @@ export interface ProgressView {
   readonly total: number
   /** Milliseconds the running step has been running; 0 when nothing is running. */
   readonly currentElapsedMs: number
+  /**
+   * Wall-clock milliseconds the whole command has taken so far (or took), gaps between
+   * steps included; 0 when nothing is known. The header states it beside the description.
+   */
+  readonly totalElapsedMs: number
   readonly bar: BarShape
 }
 
@@ -190,6 +195,8 @@ function assembleRows(
     readonly running: boolean
     readonly currentIndex: number
     readonly elapsedMs: number
+    /** Wall-clock total so far; 0 when the host has not said. */
+    readonly totalElapsedMs: number
     readonly instrumented: boolean
     readonly refused: boolean
     readonly refusedReason?: RefusalCode
@@ -242,6 +249,7 @@ function assembleRows(
     done,
     total: rows.length,
     currentElapsedMs: state.running ? state.elapsedMs : 0,
+    totalElapsedMs: state.totalElapsedMs,
     bar: barShape(rows.length),
   }
 }
@@ -290,6 +298,7 @@ export function viewFromSettled(
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
     failedIndex: isError ? lastStarted : -1,
+    totalElapsedMs: meta?.elapsedMs ?? 0,
   })
 }
 
@@ -310,6 +319,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
       running: true,
       currentIndex: -1,
       elapsedMs: 0,
+      totalElapsedMs: 0,
       instrumented: false,
       // The host has not spoken about this call yet, so no refusal is claimed.
       refused: false,
@@ -344,6 +354,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
     running: live.running,
     currentIndex,
     elapsedMs: live.elapsedMs,
+    totalElapsedMs: live.totalElapsedMs ?? 0,
     instrumented: live.instrumented,
     refused: live.refused,
     ...live.refusedReason === null ? {} : { refusedReason: live.refusedReason },
@@ -518,7 +529,25 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
     ...refusedReason === null ? {} : { refusedReason },
     ...notesRoute === undefined ? {} : { notesRoute },
     partial: record.partial === true,
+    // Narrowed like the note: a reloaded session keeps the total its card was written with.
+    ...typeof record.elapsedMs === 'number' && Number.isFinite(record.elapsedMs) && record.elapsedMs > 0
+      ? { elapsedMs: record.elapsedMs }
+      : {},
     preamble: typeof record.preamble === 'string' ? record.preamble : '',
     steps,
   }
+}
+
+/**
+ * Wall-clock milliseconds as the card's own timer reads: whole seconds, and minutes once a
+ * command is long enough that seconds alone stop being readable. The units match
+ * `formatSeconds` (the step clocks), so the header total and the list read as one family.
+ * @param milliseconds - the total, from the host's monotonic clock.
+ * @returns e.g. `12s`, `0s`, `1m 05s`.
+ */
+export function formatTotal(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000))
+  if (seconds < 60) return `${String(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${String(minutes)}m ${String(seconds % 60).padStart(2, '0')}s`
 }

@@ -39,7 +39,7 @@ import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
 import { PlainBody, StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
-import { argsOf, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
+import { argsOf, formatTotal, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
 import type { ProgressView } from './model.ts'
 import { markNotesAsked, notesAsked, rememberNotes, rememberedNotes } from './lazy-notes.ts'
 import { notesEnabled } from './notes-preference.ts'
@@ -274,6 +274,25 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
                 <span className={styles.summary}>{args.description}</span>
               </>
             )}
+            {/*
+             * The command's TOTAL time, in the header row beside the description: live while
+             * the command runs (the poll re-renders it) and frozen once it settles, when the
+             * host's record carries the final number. Same colour and figures as the step
+             * clocks, so the header and the list read as one family.
+             */}
+            {view.totalElapsedMs > 0 ? (
+              <>
+                <span className={styles.sep} aria-hidden="true" />
+                <span
+                  className={styles.total}
+                  data-total="true"
+                  title={t('row.total')}
+                  aria-label={`${t('row.total')}: ${formatTotal(view.totalElapsedMs)}`}
+                >
+                  {formatTotal(view.totalElapsedMs)}
+                </span>
+              </>
+            ) : null}
           </>
         )}
       />
