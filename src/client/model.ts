@@ -102,6 +102,11 @@ export interface StepRow {
   readonly line: number
   /** The source line. */
   readonly text: string
+  /**
+   * The same characters with display-only line breaks at top-level `;` boundaries, when the
+   * host sent one (see the host's `src/wrap.ts`). Rendering prefers it; `text` stays exact.
+   */
+  readonly displayText?: string
   /** Output attributed to this step. */
   readonly output: string
   /**
@@ -163,6 +168,8 @@ export interface ProgressView {
 interface Row {
   readonly line: number
   readonly text: string
+  /** Display-only line breaks, when the host judged the one line worth reformatting. */
+  readonly displayText?: string
   readonly output: string
   readonly droppedChars: number
   /** Carried through unchanged: how to SHOW a note is the render's business, not this layer's. */
@@ -213,6 +220,7 @@ function assembleRows(
       index: index + 1,
       line: row.line,
       text: row.text,
+      ...row.displayText === undefined ? {} : { displayText: row.displayText },
       output: row.output,
       droppedChars: row.droppedChars,
       ...row.note === undefined ? {} : { note: row.note },
@@ -257,6 +265,7 @@ export function viewFromSettled(
   const rows: Row[] = (meta?.steps ?? []).map((step) => ({
     line: step.line,
     text: step.text,
+    ...step.displayText === undefined ? {} : { displayText: step.displayText },
     output: step.output,
     droppedChars: step.droppedChars ?? 0,
     ...step.note === undefined ? {} : { note: step.note },
@@ -312,6 +321,7 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
   const rows: Row[] = live.steps.map((step) => ({
     line: step.line,
     text: step.text,
+    ...step.displayText === undefined ? {} : { displayText: step.displayText },
     output: step.output,
     droppedChars: step.droppedChars ?? 0,
     ...step.note === undefined ? {} : { note: step.note },
@@ -320,7 +330,13 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
   }))
   const currentLine = live.current
   let currentIndex = -1
-  if (currentLine !== null) {
+  // The step INDEX is authoritative: a rewritten `;` chain puts several steps on one
+  // original line, so matching by line would light the wrong row. Line matching stays as
+  // the fallback for a host that predates the index.
+  const currentStep = live.currentStep
+  if (typeof currentStep === 'number' && currentStep >= 1 && currentStep <= rows.length) {
+    currentIndex = currentStep - 1
+  } else if (currentLine !== null) {
     const found = rows.findIndex((row) => row.line === currentLine)
     if (found >= 0) currentIndex = found
   }
@@ -474,6 +490,11 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
       // Narrowed the same way, and for the same reason: a reloaded session must keep the
       // notes it was written with, and a value that is not a non-empty string is not one.
       ...typeof step.note === 'string' && step.note.length > 0 ? { note: step.note } : {},
+      // Narrowed like the note: a reloaded session must keep the line breaks its card was
+      // written with, and anything that is not a non-empty string is not a reformatting.
+      ...typeof step.displayText === 'string' && step.displayText.length > 0
+        ? { displayText: step.displayText }
+        : {},
       startedAt: typeof step.startedAt === 'number' ? step.startedAt : null,
       endedAt: typeof step.endedAt === 'number' ? step.endedAt : null,
     })

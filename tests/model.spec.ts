@@ -361,6 +361,29 @@ describe('withNotes', () => {
     expect(view.steps.map((step) => step.note)).toEqual(['跑测试', undefined])
   })
 
+  it('carries the host\'s display-only line breaks through to the row', () => {
+    // The one-liner is still ONE step; only how it renders changes. `text` must stay exactly
+    // what ran, so a copy of the command is never altered by the reformatting.
+    const view = viewFromSettled({
+      v: 1,
+      instrumented: false,
+      refused: false,
+      partial: false,
+      preamble: '',
+      steps: [{
+        line: 1,
+        text: 'cd X; build; test',
+        displayText: 'cd X; \nbuild; \ntest',
+        output: '',
+        startedAt: 0,
+        endedAt: 5,
+      }],
+    }, false)
+    expect(view.total).toBe(1)
+    expect(view.steps[0]?.text).toBe('cd X; build; test')
+    expect(view.steps[0]?.displayText).toBe('cd X; \nbuild; \ntest')
+  })
+
   it('never overwrites a note the reader has already seen', () => {
     // The persisted note and the late one come from the same model and instruction; a
     // re-rolled sentence would flicker for nothing.

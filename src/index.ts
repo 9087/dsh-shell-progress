@@ -53,6 +53,7 @@ import { drain, follow } from './run.ts'
 import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
 import type { SplitResult, Step } from './split.ts'
+import { normalizeStatements, relabelSteps } from './statements.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
 import type { LiveSnapshot, NotesRoute, NotesState, RefusalCode, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
@@ -390,6 +391,9 @@ const OUTPUT_SCHEMA = {
               // model answered about it (see `src/llm-notes.ts`). A record written without
               // one — or with the feature switched off — must still validate.
               note: { type: 'string' },
+              // NOT required: display-only line breaks for a long one-line command (see
+              // `src/wrap.ts`). `text` above stays exactly what ran.
+              displayText: { type: 'string' },
               startedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
               endedAt: { required: true, oneOf: [{ type: 'number' }, { type: 'null' }] },
             },
@@ -550,6 +554,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         refusedReason: null,
         partial: false,
         current: null,
+        currentStep: null,
         total: 0,
         elapsedMs: 0,
         preamble: '',
@@ -564,6 +569,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       refusedReason: entry.refusedReason,
       partial: entry.lossy || entry.tracker.droppedOutput(),
       current: entry.tracker.current(),
+      currentStep: entry.tracker.currentStep(),
       total: entry.steps.length,
       elapsedMs: entry.tracker.elapsed(performance.now()),
       preamble: entry.tracker.preamble(),
@@ -667,8 +673,16 @@ export function apply(ctx: Context, config: Config = {}): void {
         const standing = exec.agent === undefined ? {} : { session: exec.agent.session }
         const policy = sandboxPolicy?.resolve(standing)
         const readOnly = policy?.mode === 'read-only'
-        const split = await resolveSplit(dialect, args.command)
-        const reason = refusalReason(dialect, args.command, split, readOnly, maxSteps)
+        // A `;` chain on ONE line is normalized to one top-level statement per line FIRST, so
+        // the line-based planner and the line-start markers apply unchanged — PowerShell treats
+        // `;` and a newline as the same statement separator. Only PowerShell: bash has
+        // `case`/`;;` forms this scanner deliberately does not read. When the scanner refuses
+        // (quotes, `#`, here-strings, blocks, a continuation) the command runs exactly as
+        // written and is reported as it would have been before.
+        const normalized = dialect.id === 'pwsh' ? normalizeStatements(args.command) : undefined
+        const commandText = normalized?.text ?? args.command
+        const split = await resolveSplit(dialect, commandText)
+        const reason = refusalReason(dialect, commandText, split, readOnly, maxSteps)
         const instrumented = reason === undefined
         // The reason itself is English and internal (it goes to the host log); the card gets a
         // CODE so its tooltip can be written in the reader's language. See `RefusalCode`.
@@ -690,14 +704,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         // command — and its output is budgeted like any other step's.
         const steps: readonly Step[] = refused
           ? [{ line: 1, text: args.command }]
-          : split.steps
+          : normalized === undefined ? split.steps : relabelSteps(split.steps, normalized)
         // `warn`, not `debug`: the card no longer says anything about tracking — a refused
         // call shows its command and its output, nothing more — so this line is the only
         // place the REASON is stated, and it has to be visible without debug logging on.
         if (reason !== undefined) ctx.logger.warn(`shell-progress: running the command unmodified — ${reason}`)
 
         const nonce = createNonce()
-        const text = instrumented ? dialect.instrument(args.command, split.steps, nonce) : args.command
+        const text = instrumented ? dialect.instrument(commandText, steps, nonce) : args.command
         const workdir = resolveWorkdir(args.workdir, exec)
         const request: ShellExecRequest = {
           command: text,

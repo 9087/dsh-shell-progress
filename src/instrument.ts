@@ -134,7 +134,10 @@ export function instrument(source: string, steps: readonly Step[], nonce: string
   const sentinel = `__dsh_shell_progress_absent_${nonce}__`
   const marked = new Map<number, string>()
   for (const step of steps) {
-    marked.set(step.line, `${inlineMarker(nonce, step.line, sentinel)}; ${step.text}`)
+    // The MARKER lives on the executed line; the card's line stays whatever `step.line` says.
+    // They differ only when a `;` chain was rewritten one statement per line first.
+    const anchor = step.anchor ?? step.line
+    marked.set(anchor, `${inlineMarker(nonce, anchor, sentinel)}; ${step.text}`)
   }
   return source
     .split(/\r\n|\n|\r/)

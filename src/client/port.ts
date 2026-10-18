@@ -90,6 +90,7 @@ export function emptySnapshot(): LiveSnapshot {
     refusedReason: null,
     partial: false,
     current: null,
+    currentStep: null,
     total: 0,
     elapsedMs: 0,
     preamble: '',
@@ -125,8 +126,7 @@ function stepOf(value: unknown): StepProgress | undefined {
   }
 }
 
-/** Narrow the snapshot value; a value that is not a snapshot at all is `undefined`. */
-export function snapshotOf(value: unknown): LiveSnapshot | undefined {
+/** Narrow the snapshot value; a value that is not a snapshot at all is `undefined`. */export function snapshotOf(value: unknown): LiveSnapshot | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   // A well-formed "I have no record of this call" is USABLE information, distinct
@@ -140,6 +140,7 @@ export function snapshotOf(value: unknown): LiveSnapshot | undefined {
     if (step !== undefined) steps.push(step)
   }
   const current = record.current
+  const currentStep = record.currentStep
   const elapsed = record.elapsedMs
   const total = record.total
   return {
@@ -150,6 +151,9 @@ export function snapshotOf(value: unknown): LiveSnapshot | undefined {
     refusedReason: refusalCodeOf(record.refusedReason),
     partial: record.partial === true,
     current: typeof current === 'number' && Number.isFinite(current) ? current : null,
+    ...typeof currentStep === 'number' && Number.isFinite(currentStep)
+      ? { currentStep }
+      : {},
     total: typeof total === 'number' && Number.isFinite(total) ? total : steps.length,
     elapsedMs: typeof elapsed === 'number' && Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0,
     preamble: typeof record.preamble === 'string' ? record.preamble : '',

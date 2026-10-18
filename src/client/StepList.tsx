@@ -112,7 +112,7 @@ function StepRowView({ row, total, toolName, liveElapsedMs, hovered, onHover, la
          * append it — and it wraps with the text when the text wraps.
          */}
         <div className={styles.code} data-code="true">
-          {commandContent(row.text, toolName)}
+          {commandContent(row.displayText ?? row.text, toolName)}
           {duration === null ? null : <span className={styles.time} data-time="true">[{duration}]</span>}
         </div>
       </div>

@@ -12,11 +12,22 @@
 import type { StreamEvent } from './parse.ts'
 import type { Step } from './split.ts'
 import type { StepProgress } from './types.ts'
+import { wrappedDisplayText } from './wrap.ts'
 
 /** One step's mutable bookkeeping. */
 interface StepState {
   readonly line: number
+  /**
+   * The value this step's marker carries: its line in the EXECUTED text. Equal to `line`
+   * unless a one-line `;` chain was rewritten before planning (see `./statements`).
+   */
+  readonly anchor: number
   readonly text: string
+  /**
+   * The same characters with display-only newlines at top-level `;` boundaries, or null when
+   * the line needs no reformatting. Rendering prefers it; `text` stays what was executed.
+   */
+  readonly displayText: string | null
   readonly lines: string[]
   chars: number
   /**
@@ -66,7 +77,9 @@ export class StepTracker {
     this.maxStepOutputChars = options.maxStepOutputChars ?? DEFAULT_MAX_STEP_OUTPUT_CHARS
     this.states = steps.map((step) => ({
       line: step.line,
+      anchor: step.anchor ?? step.line,
       text: step.text,
+      displayText: wrappedDisplayText(step.text) ?? null,
       lines: [],
       chars: 0,
       droppedChars: 0,
@@ -83,6 +96,17 @@ export class StepTracker {
       return
     }
     this.append(event.text)
+  }
+
+  /**
+   * 1-based INDEX of the step running now, or null before the first marker.
+   *
+   * Distinct from {@link current} on purpose: several steps can share one original line
+   * after a `;` chain is rewritten, so a line number cannot identify the running step.
+   * @returns the running step's index, or null.
+   */
+  currentStep(): number | null {
+    return this.cursor === null ? null : this.cursor + 1
   }
 
   /**
@@ -131,7 +155,7 @@ export class StepTracker {
    */
   beginSoleStep(): void {
     const only = this.states.length === 1 ? this.states[0] : undefined
-    if (only !== undefined) this.mark(only.line)
+    if (only !== undefined) this.mark(only.anchor)
   }
 
   /** Output produced before the first marker. */
@@ -168,6 +192,8 @@ export class StepTracker {
     return this.states.map((state) => ({
       line: state.line,
       text: state.text,
+      // Omitted rather than null, so a line that needs no reformatting adds no field.
+      ...(state.displayText === null ? {} : { displayText: state.displayText }),
       output: joinLines(state.lines),
       droppedChars: state.droppedChars,
       // Omitted rather than null, so "no note" adds no field to the persisted record.
@@ -177,14 +203,14 @@ export class StepTracker {
     }))
   }
 
-  /** Index of the step whose original line number is `line`, or -1. */
-  private indexOf(line: number): number {
-    return this.states.findIndex((state) => state.line === line)
+  /** Index of the step whose MARKER value is `anchor`, or -1. */
+  private indexOf(anchor: number): number {
+    return this.states.findIndex((state) => state.anchor === anchor)
   }
 
-  /** Switch the cursor to `line` and stamp the transition. */
-  private mark(line: number): void {
-    const index = this.indexOf(line)
+  /** Switch the cursor to the step `anchor` names and stamp the transition. */
+  private mark(anchor: number): void {
+    const index = this.indexOf(anchor)
     // A marker for a line this run never instrumented is not ours to act on.
     if (index < 0) return
     // Instrumentation is top-level only, so one step can never announce

@@ -25,6 +25,14 @@ export interface Step {
   readonly line: number
   /** The line's text, without its terminator. */
   readonly text: string
+  /**
+   * The line in the EXECUTED text the step's marker must be written on, when the two differ.
+   *
+   * They differ when a one-line `;` chain was rewritten to one statement per line before
+   * planning (see `./statements`): the marker then belongs on the rewritten line, while the
+   * card must keep showing the line the reader actually typed. Absent means "same line".
+   */
+  readonly anchor?: number
 }
 
 /** The splitter's answer: the steps it found, and whether they can be trusted. */

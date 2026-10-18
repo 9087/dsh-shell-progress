@@ -60,6 +60,15 @@ export interface StepProgress extends StepLine {
    */
   readonly note?: string
   /**
+   * The same text with DISPLAY-ONLY line breaks at its top-level `;` boundaries, or absent.
+   *
+   * The step is one line because the planner is line-based (see `src/plan.ts`), and an agent
+   * that writes `build; echo; test; echo; report` as one line gets one enormous row. This
+   * field carries the same characters with newlines inserted so the card can render it
+   * readably; `text` stays byte-for-byte what ran and nothing here is ever executed.
+   */
+  readonly displayText?: string
+  /**
    * Characters the per-step output budget DISCARDED, or absent/0 when nothing was.
    *
    * This is what lets the card state the cut at the cut: `output` alone cannot say
@@ -187,6 +196,14 @@ export interface LiveSnapshot {
   readonly partial: boolean
   /** Line number of the step executing now, or null before the first marker. */
   readonly current: number | null
+  /**
+   * 1-based INDEX of the step executing now, or null before the first marker.
+   *
+   * The index is what the client needs: a rewritten `;` chain puts several steps on one
+   * original line, so `current` alone cannot say which row is running. Optional for a host
+   * that predates the field; the client then falls back to matching `current` against rows.
+   */
+  readonly currentStep?: number | null
   /** Number of top-level steps the command was split into. */
   readonly total: number
   /** Milliseconds the current step has been running; 0 when no step has started. */

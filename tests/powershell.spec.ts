@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createNonce, instrument, markerPattern, stripMarkers } from '../src/instrument.ts'
 import { splitSteps } from '../src/split.ts'
+import { normalizeStatements } from '../src/statements.ts'
 import { resolvePowershell } from './powershell-path.ts'
 
 interface Run {
@@ -262,5 +263,36 @@ describe.skipIf(!available)('the marker stays out of the command\'s own data', (
     expect(asUtf16).not.toContain('__DSH_STEP_')
     expect(asUtf8).not.toContain('__DSH_STEP_')
     expect(`${asUtf16}${asUtf8}`).toContain('x')
+  })
+})
+
+describe.skipIf(!available)('a one-line `;` chain, split into statements', () => {
+  /** One chain exercising an assignment, a failure, and output on both sides of it. */
+  const CHAIN = "Write-Output alpha; $v = 41; Write-Output ($v + 1); cmd.exe /c exit 3; Write-Output 'after the failure'"
+
+  it('runs byte-identically to the plain command, with the same exit code', async () => {
+    // THE CLAIM THIS FEATURE STANDS ON: rewriting `;` to newlines is semantically neutral,
+    // and the inlined markers keep `$?` as the plain command sees it. Measured against a real
+    // shell, not reasoned about.
+    const plain = await pwsh(CHAIN)
+    const normalized = normalizeStatements(CHAIN)
+    expect(normalized, 'the chain must normalize').toBeDefined()
+    const source = normalized?.text ?? ''
+    const steps = source.split('\n').map((text, index) => ({ line: index + 1, text }))
+    const nonce = createNonce()
+    const marked = await pwsh(instrument(source, steps, nonce))
+    const normalise = (text: string): string => stripMarkers(text, nonce).replace(/\r\n/g, '\n').trimEnd()
+    expect(normalise(marked.stdout), 'the instrumented output differs from the plain one').toBe(normalise(plain.stdout))
+    expect(marked.code, 'the exit code differs').toBe(plain.code)
+  })
+
+  it('announces one step per statement', async () => {
+    const normalized = normalizeStatements(CHAIN)
+    const source = normalized?.text ?? ''
+    const steps = source.split('\n').map((text, index) => ({ line: index + 1, text }))
+    const nonce = createNonce()
+    const run = await pwsh(instrument(source, steps, nonce))
+    expect(markerCount(run.stdout, nonce)).toBe(steps.length)
+    expect(steps).toHaveLength(5)
   })
 })

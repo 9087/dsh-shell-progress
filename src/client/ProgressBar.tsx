@@ -130,7 +130,7 @@ export function stepCard(
         <p className={styles.cardNote} data-card-note="true">{`# ${row.note}`}</p>
       )}
       <div className={styles.cardCommand} data-card-command="true">
-        {commandContent(row.text, toolName)}
+        {commandContent(row.displayText ?? row.text, toolName)}
         {duration === null ? null : <span className={styles.cardTime} data-card-time="true">[{duration}]</span>}
       </div>
       {output === null ? null : (
