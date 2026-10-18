@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { emptySnapshot, snapshotOf } from '../src/client/port.ts'
+import { emptySnapshot, notesOf, snapshotOf } from '../src/client/port.ts'
 
 /** A well-formed live record for a refused call: no steps, and the flag. */
 const REFUSED = {
@@ -103,5 +103,21 @@ describe('a live step row', () => {
     expect(snapshotOf(row(42))?.steps[0]?.note).toBeUndefined()
     expect(snapshotOf(row(''))?.steps[0]?.note).toBeUndefined()
     expect(snapshotOf(row())?.steps[0]?.note).toBeUndefined()
+  })
+})
+
+describe('notesOf', () => {
+  it('turns the wire\'s nulls into holes, one entry per line', () => {
+    expect(notesOf({ notes: ['跑测试', null, '构建'] })).toEqual(['跑测试', undefined, '构建'])
+  })
+
+  it('answers undefined when there is nothing to show', () => {
+    // The host's "no notes" answer must not become an empty array the card would cache as
+    // an answer: a later hover should be allowed to try again.
+    expect(notesOf({ notes: null })).toBeUndefined()
+    expect(notesOf({ notes: [] })).toBeUndefined()
+    expect(notesOf({ notes: [null, undefined, ''] })).toBeUndefined()
+    expect(notesOf({ notes: 'nonsense' })).toBeUndefined()
+    expect(notesOf(undefined)).toBeUndefined()
   })
 })

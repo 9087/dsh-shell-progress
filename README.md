@@ -30,7 +30,7 @@ Collapsed, the card's summary row carries a segmented bar, one segment per top-l
 
 ![The card a segment opens on hover: a line of prose above the command, then that step's output and time](https://raw.githubusercontent.com/9087/dsh-shell-progress/main/docs/assets/hover.png)
 
-In the hover card, each step gets a one-line comment above its command line, spelling out what that line is for. (The lines come from the model, which costs one extra call per command; they can be switched off on the DSH Settings page under "Shell Progress" and are on by default.)
+In the hover card, each step gets a one-line comment above its command line, spelling out what that line is for. (The lines come from the model, written alongside the command so a run never waits for them; each distinct command is asked for once, and a card whose notes missed the record fetches them the first time you hover or open it. They can be switched off on the DSH Settings page under "Shell Progress" and are on by default.)
 
 Expanding the card shows the command's steps, one row each: the line's command, plus its time and output; the step in flight carries a running clock.
 

@@ -39,8 +39,10 @@ import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
 import { PlainBody, StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
-import { argsOf, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled } from './model.ts'
+import { argsOf, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
 import type { ProgressView } from './model.ts'
+import { markNotesAsked, notesAsked, rememberNotes, rememberedNotes } from './lazy-notes.ts'
+import { notesEnabled } from './notes-preference.ts'
 import type { ProgressSnapshot } from './store.ts'
 import styles from './Row.module.css'
 
@@ -109,6 +111,20 @@ export interface ShellProgressFace {
    * above, and components never wire their own subscriptions.
    */
   watchCall(callId: string): () => void
+  /**
+   * Ask the host to write notes for one card's step lines.
+   *
+   * Used by a card whose notes never arrived — the command ended before the model answered —
+   * the first time the reader opens or hovers it. The host caches the answer per command, so
+   * this costs a model call at most once per distinct command.
+   * @param request - the step lines and the route the card was written with.
+   * @returns one note per line, or `undefined` when the host could not write them.
+   */
+  notes(request: {
+    readonly lines: readonly string[]
+    readonly provider: string
+    readonly model: string
+  }): Promise<readonly (string | undefined)[] | undefined>
 }
 
 /** Full props of the registered row. */
@@ -150,12 +166,17 @@ function untrackedLabel(t: ShellProgressRowProps['t'], code: RefusalCode | undef
 
 /** The registered component. */
 export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
-  const { block, callId, toolName, t, useProgress, watchCall } = props
+  const { block, callId, toolName, t, useProgress, watchCall, notes: fetchNotes } = props
   const [open, setOpen] = useState(false)
   // Which step the pointer is on, from EITHER view. Held here because the bar and
   // the step list are separate components: hovering a segment lights the matching
   // line, hovering a line lights its segment, and the two read as one display.
   const [linkedStep, setLinkedStep] = useState<number | null>(null)
+  // Notes this card asked for itself, when its record carried none. Seeded from the page
+  // cache so a re-mounted card never asks twice.
+  const [lazyNotes, setLazyNotes] = useState<readonly (string | undefined)[] | undefined>(
+    () => rememberedNotes(callId),
+  )
 
   const settled = isSettledBlock(block)
   const failed = isErrorBlock(block)
@@ -173,9 +194,38 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
     return watchCall(callId)
   }, [callId, settled, watchCall])
 
-  const view: ProgressView = settled
+  const recorded: ProgressView = settled
     ? viewFromSettled(metaOf(block), failed)
     : viewFromLive(live as LiveSnapshot | undefined)
+  const view: ProgressView = lazyNotes === undefined ? recorded : withNotes(recorded, lazyNotes)
+
+  // THE LAZY NOTES. A card's notes are frozen when its command ends, so a command that
+  // finishes before the model answers has none at all. The card therefore asks for them the
+  // first time the reader actually looks at it — opened, or a segment hovered — and only
+  // once: the host caches per command, this page caches per card, and a failure simply
+  // leaves the card without notes rather than retrying behind the reader's back.
+  useEffect(() => {
+    if (lazyNotes !== undefined) return
+    if (!open && linkedStep === null) return
+    if (!notesEnabled()) return
+    const route = recorded.notesRoute
+    if (route === undefined) return
+    if (!recorded.steps.some((step) => step.note === undefined)) return
+    if (typeof fetchNotes !== 'function') return
+    if (notesAsked(callId)) return
+    const lines = recorded.steps.map((step) => step.text)
+    if (lines.length === 0) return
+    markNotesAsked(callId)
+    void fetchNotes({ lines, provider: route.provider, model: route.model })
+      .then((answer) => {
+        if (answer === undefined) return
+        rememberNotes(callId, answer)
+        setLazyNotes(answer)
+      })
+      .catch(() => {
+        // A note is a convenience; the card is complete without one.
+      })
+  }, [callId, fetchNotes, lazyNotes, linkedStep, open, recorded])
 
   const barLabels: ProgressBarLabels = {
     stepLabel: (row, total) => t('row.stepLabel', { index: row.index, total, line: row.line }),

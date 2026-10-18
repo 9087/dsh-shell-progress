@@ -28,20 +28,23 @@ interface Section {
 }
 
 /** A context good enough for `apply`, with cordis's inject guard reproduced. */
-function fakeContext(options: { readonly connection?: unknown } = {}): {
+function fakeContext(options: { readonly connection?: unknown; readonly llm?: unknown } = {}): {
   readonly ctx: unknown
   readonly registered: { readonly name: string; readonly output: unknown }[]
   readonly sections: Section[]
   readonly channels: string[]
+  readonly handlers: unknown[]
   readonly dynamicInjections: string[][]
 } {
   const registered: { name: string; output: unknown }[] = []
   const sections: Section[] = []
   const channels: string[] = []
+  const handlers: unknown[] = []
   const dynamicInjections: string[][] = []
   const declared = new Set<string>(declaredInject)
 
   const base: Record<string, unknown> = {
+    llm: options.llm,
     tools: {
       register: (definition: { name: string; output: unknown }) => {
         registered.push(definition)
@@ -86,20 +89,22 @@ function fakeContext(options: { readonly connection?: unknown } = {}): {
     },
   })
 
-  return { ctx, registered, sections, channels, dynamicInjections }
+  return { ctx, registered, sections, channels, handlers, dynamicInjections }
 }
 
-/** A connection surface that records which channel was mounted. */
-function fakeConnection(channels: string[]): unknown {
+/** A connection surface that records which channel was mounted, and its handler. */
+function fakeConnection(channels: string[], handlers: unknown[] = []): unknown {
   return {
     rpc: {
-      handle: (channel: string) => {
+      handle: (channel: string, handler: unknown) => {
         channels.push(channel)
+        handlers.push(handler)
         return () => {}
       },
     },
-    register: (_ctx: unknown, channel: string) => {
+    register: (_ctx: unknown, channel: string, handler: unknown) => {
       channels.push(channel)
+      handlers.push(handler)
       return () => {}
     },
   }
@@ -186,5 +191,105 @@ describe('apply', () => {
     expect(typeof output.presentationMeta).toBe('function')
     const meta = { v: 1, instrumented: true, partial: false, preamble: '', steps: [] }
     expect(output.presentationMeta?.({}, { progress: meta })).toEqual(meta)
+  })
+})
+
+/** A fake model that counts its requests and answers with one fixed text. */
+function fakeLlm(answer: string): { readonly llm: unknown; readonly calls: () => number } {
+  let calls = 0
+  const llm = {
+    stream: () => {
+      calls += 1
+      return (async function* generate() { yield { type: 'text', text: answer } })()
+    },
+  }
+  return { llm, calls: () => calls }
+}
+
+type ChannelReply = { readonly ok: boolean; readonly value?: unknown }
+
+/** One lazy notes request, as the card sends it. */
+type NotesHandler = (endpoint: string, payload: unknown) => Promise<ChannelReply>
+
+/** Mount the plugin over a fake connection and hand back the channel handler it registered. */
+function mount(llm?: unknown): { readonly handler: NotesHandler; readonly channels: string[] } {
+  const channels: string[] = []
+  const handlers: unknown[] = []
+  const { ctx } = fakeContext({ connection: fakeConnection(channels, handlers), ...llm === undefined ? {} : { llm } })
+  apply(ctx as never, {})
+  const handler = handlers[0] as NotesHandler | undefined
+  if (handler === undefined) throw new Error('the plugin mounted no channel handler')
+  return { handler, channels }
+}
+
+/**
+ * A request for one card's notes.
+ *
+ * Each test uses DIFFERENT LINES: the cache is module-level and shared by this file, so a
+ * repeated command would be answered from the previous test and the model-call counts below
+ * would measure nothing.
+ */
+function notesRequest(lines: readonly string[], overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { lines, locale: 'zh-CN', provider: 'deepseek', model: 'deepseek-chat', ...overrides }
+}
+
+describe('the notes endpoint', () => {
+  it('writes one note per line, and answers the SAME command from cache', async () => {
+    const { llm, calls } = fakeLlm('1: 安装依赖\n2: 构建产物')
+    const { handler } = mount(llm)
+    const request = notesRequest(['pnpm install', 'pnpm run build'])
+    const first = await handler('notes', request)
+    expect(first.ok).toBe(true)
+    expect((first.value as { notes: unknown }).notes).toEqual(['安装依赖', '构建产物'])
+    // THE SECOND ASK IS FREE: same lines, same language, same model. A reader runs the same
+    // commands all day, and a card that missed its notes must not re-describe them.
+    const second = await handler('notes', request)
+    expect((second.value as { notes: unknown }).notes).toEqual(['安装依赖', '构建产物'])
+    expect(calls()).toBe(1)
+  })
+
+  it('asks the model again for a different language', async () => {
+    const { llm, calls } = fakeLlm('1: install\n2: build')
+    const { handler } = mount(llm)
+    const request = notesRequest(['pnpm install --frozen-lockfile', 'pnpm run build'])
+    await handler('notes', request)
+    await handler('notes', { ...request, locale: 'en' })
+    // The cached sentence is in the wrong language, so a language switch must MISS.
+    expect(calls()).toBe(2)
+  })
+
+  it('answers nothing for a malformed request, without asking the model', async () => {
+    const { llm, calls } = fakeLlm('1: never')
+    const { handler } = mount(llm)
+    for (const payload of [{}, { lines: [] }, { lines: [1] }, { lines: ['x'] }, { ...notesRequest(['y']), provider: '' }]) {
+      const answer = await handler('notes', payload)
+      expect(answer.ok).toBe(true)
+      expect((answer.value as { notes: unknown }).notes).toBeNull()
+    }
+    expect(calls()).toBe(0)
+  })
+
+  it('answers nothing when the host has no llm service', async () => {
+    const { handler } = mount()
+    const answer = await handler('notes', notesRequest(['git status']))
+    expect((answer.value as { notes: unknown }).notes).toBeNull()
+  })
+
+  it('honours the reader\'s switch', async () => {
+    const { llm, calls } = fakeLlm('1: 安装依赖')
+    const { handler } = mount(llm)
+    await handler('configure', { enabled: false, locale: 'zh-CN' })
+    expect(((await handler('notes', notesRequest(['pnpm ci']))).value as { notes: unknown }).notes).toBeNull()
+    expect(calls()).toBe(0)
+    // The switch is module-level; leave it on for whatever runs after this file.
+    await handler('configure', { enabled: true, locale: 'zh-CN' })
+  })
+
+  it('turns the wire\'s holes into null', async () => {
+    // The model answered only the second line; JSON has no `undefined`, so the first is null.
+    const { llm } = fakeLlm('2: 构建产物')
+    const { handler } = mount(llm)
+    const answer = await handler('notes', notesRequest(['pnpm install --offline', 'pnpm run build']))
+    expect((answer.value as { notes: unknown }).notes).toEqual([null, '构建产物'])
   })
 })

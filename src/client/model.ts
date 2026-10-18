@@ -29,7 +29,7 @@
  * @module dsh-shell-progress/client/model
  */
 
-import type { LiveSnapshot, RefusalCode, ShellProgressMeta, StepProgress } from '../types.ts'
+import type { LiveSnapshot, NotesRoute, RefusalCode, ShellProgressMeta, StepProgress } from '../types.ts'
 import { refusalCodeOf } from './port.ts'
 
 /** The tool arguments this plugin reads back off a call block. */
@@ -138,6 +138,13 @@ export interface ProgressView {
   readonly refused: boolean
   /** Why it was refused, as a code the row translates; absent unless something was refused. */
   readonly refusedReason?: RefusalCode
+  /**
+   * The route a LAZY notes request must use for this card, when the host recorded one.
+   *
+   * Absent means the card has no way to ask for notes later (no route was available when the
+   * command ran, or the record predates this field), so it simply shows none.
+   */
+  readonly notesRoute?: NotesRoute
   /** True when some output could not be attributed. */
   readonly partial: boolean
   /** True while the command is still running. */
@@ -179,6 +186,7 @@ function assembleRows(
     readonly instrumented: boolean
     readonly refused: boolean
     readonly refusedReason?: RefusalCode
+    readonly notesRoute?: NotesRoute
     readonly partial: boolean
     readonly preamble: string
     readonly failedIndex: number
@@ -219,6 +227,7 @@ function assembleRows(
     instrumented: state.instrumented,
     refused: state.refused,
     ...state.refusedReason === undefined ? {} : { refusedReason: state.refusedReason },
+    ...state.notesRoute === undefined ? {} : { notesRoute: state.notesRoute },
     partial: state.partial,
     running: state.running,
     currentIndex: state.currentIndex,
@@ -268,6 +277,7 @@ export function viewFromSettled(
     instrumented: meta?.instrumented ?? false,
     refused: meta?.refused ?? false,
     ...meta?.refusedReason === undefined ? {} : { refusedReason: meta.refusedReason },
+    ...meta?.notesRoute === undefined ? {} : { notesRoute: meta.notesRoute },
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
     failedIndex: isError ? lastStarted : -1,
@@ -401,6 +411,42 @@ export function argsOf(block: unknown): ToolArgs {
 }
 
 /**
+ * Narrow the persisted notes route. Anything malformed is dropped: a card with a bad route
+ * simply never asks, which is better than asking with a wrong provider or model name.
+ * @param value - the raw `notesRoute` field.
+ * @returns the route, or `undefined`.
+ */
+function notesRouteOf(value: unknown): NotesRoute | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.provider !== 'string' || record.provider.length === 0) return undefined
+  if (typeof record.model !== 'string' || record.model.length === 0) return undefined
+  return { provider: record.provider, model: record.model }
+}
+
+/**
+ * The view with the notes a card asked for itself filled in.
+ *
+ * A LATE note answers for lines that had none; a line that already carries one keeps it — the
+ * persisted note came from the same model and the same instruction, and overwriting a note the
+ * reader has already seen with a re-rolled one would be a flicker with no gain.
+ * @param view - the view as built from the record.
+ * @param notes - the lazy answer, one entry per line.
+ * @returns a view with the missing notes filled in (the same object when nothing changed).
+ */
+export function withNotes(view: ProgressView, notes: readonly (string | undefined)[]): ProgressView {
+  let changed = false
+  const steps = view.steps.map((row, index) => {
+    if (row.note !== undefined) return row
+    const note = notes[index]
+    if (note === undefined) return row
+    changed = true
+    return { ...row, note }
+  })
+  return changed ? { ...view, steps } : view
+}
+
+/**
  * Narrow a call block's `presentationMeta` into this plugin's progress shape.
  * @param block - the settled block.
  * @returns the progress metadata, or undefined when it is absent or foreign.
@@ -443,11 +489,13 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
   // and the code is what the card translates. A newer host's unknown code reads as no
   // reason, which leaves the generic sentence in place.
   const refusedReason = refusalCodeOf(record.refusedReason)
+  const notesRoute = notesRouteOf(record.notesRoute)
   return {
     v: typeof record.v === 'number' ? record.v : 0,
     instrumented: record.instrumented === true,
     refused: record.refused === true,
     ...refusedReason === null ? {} : { refusedReason },
+    ...notesRoute === undefined ? {} : { notesRoute },
     partial: record.partial === true,
     preamble: typeof record.preamble === 'string' ? record.preamble : '',
     steps,

@@ -17,7 +17,8 @@ import { TOOL_NAMES } from '../types.ts'
 import { en, NS, zh } from './locales.ts'
 import { createProgressPort } from './port.ts'
 import { SettingsSection } from './SettingsSection.tsx'
-import { notesEnabled, onNotesEnabledChange } from './notes-preference.ts'
+import { notesEnabled, notesLocale, onNotesEnabledChange, setNotesLocale } from './notes-preference.ts'
+import { resetLazyNotes } from './lazy-notes.ts'
 import { ShellProgressRow } from './Row.tsx'
 import type { ShellProgressFace } from './Row.tsx'
 import { createProgressStore } from './store.ts'
@@ -110,6 +111,9 @@ export function apply(ctx: Context): void {
       console.warn('shell-progress: the locale service named no language, so step notes stay off')
       return
     }
+    // Kept client-side too: a card that asks for notes itself (see the row's lazy request)
+    // has no way to read the locale service, and must ask in the reader's language.
+    setNotesLocale(id)
     void port.configure({ enabled: notesEnabled(), locale: id })
   }
 
@@ -146,11 +150,22 @@ export function apply(ctx: Context): void {
   ctx.effect(() => locale.register(NS, { en, zh }), 'ui-shell-progress: dictionaries')
   // A reconnected transport invalidates every open poll: the host generation
   // that owned those calls is gone, and stale numbers are worse than none.
-  ctx.effect(() => ctx.on('connection/reset', () => { store.reset() }), 'ui-shell-progress: transport reset')
+  ctx.effect(() => ctx.on('connection/reset', () => {
+    store.reset()
+    // Notes fetched from that host generation describe cards it no longer holds.
+    resetLazyNotes()
+  }), 'ui-shell-progress: transport reset')
 
   const face = (): ShellProgressFace => ({
     hooks: { progress: store },
     watchCall: (callId) => store.watch(callId),
+    notes: async (request) => {
+      // The language is this page's, not the card's: the card only knows the lines and the
+      // route. No language yet means no request — a note in the wrong language is worse.
+      const language = notesLocale()
+      if (language === undefined) return undefined
+      return await port.notes({ ...request, locale: language })
+    },
   })
 
   // One view per wire name the host registers. The two are registered in separate

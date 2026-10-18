@@ -62,6 +62,22 @@ export interface ProgressPort {
    * @param options - the switch and the reader's language.
    */
   configure(options: { readonly enabled: boolean; readonly locale: string }): Promise<void>
+  /**
+   * Ask the host to write notes for one card's step lines.
+   *
+   * For a card whose notes never arrived: the command finished before the model answered, so
+   * nothing was persisted. The request costs a model call, so the card makes it at most once,
+   * and only for a card the reader actually looked at.
+   * @param request - the step lines, and the route the card was written with.
+   * @returns one note per line (`undefined` where there is none), or `undefined` when the
+   *   host could not write them.
+   */
+  notes(request: {
+    readonly lines: readonly string[]
+    readonly locale: string
+    readonly provider: string
+    readonly model: string
+  }): Promise<readonly (string | undefined)[] | undefined>
 }
 
 /** The empty answer, used for every malformed or absent wire value. */
@@ -142,6 +158,22 @@ export function snapshotOf(value: unknown): LiveSnapshot | undefined {
 }
 
 /**
+ * Narrow a notes answer: `{ notes: (string | null)[] }` over the wire.
+ * @param value - the raw channel value.
+ * @returns one entry per line, `undefined` for a hole, or `undefined` when the answer holds
+ *   no notes at all.
+ */
+export function notesOf(value: unknown): readonly (string | undefined)[] | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const raw = (value as { readonly notes?: unknown }).notes
+  if (!Array.isArray(raw)) return undefined
+  const notes: (string | undefined)[] = raw.map((note) => (
+    typeof note === 'string' && note.length > 0 ? note : undefined
+  ))
+  return notes.some((note) => note !== undefined) ? notes : undefined
+}
+
+/**
  * Build the port over the connection's generic channel caller.
  * @param rpc - the connection's channel caller.
  * @returns the typed port.
@@ -163,6 +195,16 @@ export function createProgressPort(rpc: ClientConnectionRpc): ProgressPort {
         await rpc.call(PROGRESS_CHANNEL, 'configure', { enabled: options.enabled, locale: options.locale })
       } catch {
         // Ignored on purpose — see above.
+      }
+    },
+    async notes(request) {
+      try {
+        const result = await rpc.call(PROGRESS_CHANNEL, 'notes', request)
+        // A host too old to know the endpoint answers `!ok`; the card stays without notes.
+        if (!result.ok) return undefined
+        return notesOf(result.value)
+      } catch {
+        return undefined
       }
     },
   }

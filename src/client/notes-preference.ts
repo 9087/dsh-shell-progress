@@ -65,3 +65,22 @@ export function onNotesEnabledChange(listener: (enabled: boolean) => void): () =
     listeners.delete(listener)
   }
 }
+
+/** The interface language the notes must be written in, as last told by the shell. */
+let activeLanguage: string | undefined
+
+/**
+ * Remember the active interface language, so a LAZY notes request asks for the right one.
+ * @param id - the active language's id, e.g. `zh-CN`.
+ */
+export function setNotesLocale(id: string): void {
+  activeLanguage = id.length > 0 ? id : undefined
+}
+
+/**
+ * The language the notes must be written in.
+ * @returns the last id the shell reported, or `undefined` before it said.
+ */
+export function notesLocale(): string | undefined {
+  return activeLanguage
+}

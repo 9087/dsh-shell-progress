@@ -208,30 +208,72 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
 }
 
 /**
- * Wait for an in-flight notes request, but never longer than `budgetMs`.
+ * One command's notes, kept so the SAME command is never described twice.
  *
- * THE CARD'S METADATA IS FROZEN when the command ends, so a note that lands after that line
- * is invisible however good it is — and a one-second command finishes long before the model
- * answers. The request goes out beside the command and is normally back inside a longer run;
- * this bounded grace is what keeps its notes when the run is shorter than the model is.
- *
- * A failure is not an error here: the caller's card is complete without notes, so the
- * request's rejection is swallowed and the budget still bounds the wait.
- *
- * @param work - the request's continuation.
- * @param budgetMs - the longest the card may be held past its end.
- * @returns a promise that settles when the work does or the budget expires, whichever first.
+ * A reader runs the same handful of commands all day (`pnpm test`, `git status`, a build
+ * script), and each one would otherwise pay a model call. The key is the command itself plus
+ * the language and the model that wrote it, so a language switch is a MISS rather than a
+ * reused sentence in the wrong language.
  */
-export async function waitForNotes(work: Promise<unknown>, budgetMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, budgetMs)
-    // The host has nothing else to do with this timer; it must not keep a process alive.
-    ;(timer as { unref?: () => void }).unref?.()
-  })
-  try {
-    await Promise.race([work.then(() => undefined).catch(() => undefined), deadline])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
+export interface NotesCache {
+  /**
+   * Read one cached set.
+   * @param key - the key {@link notesKey} built.
+   * @returns the notes, or `undefined` when nothing is cached.
+   */
+  get(key: string): readonly (string | undefined)[] | undefined
+  /**
+   * Remember one set, evicting the least recently used past the cap.
+   * @param key - the key {@link notesKey} built.
+   * @param notes - the notes to keep.
+   */
+  set(key: string, notes: readonly (string | undefined)[]): void
+}
+
+/**
+ * The key one note set is cached under.
+ *
+ * The command lines are joined with a NUL, which a shell line cannot contain, so two
+ * different commands can never share a key; the locale and model lead so a human reading a
+ * key with a debugger sees the two things that make it language-specific first.
+ * @param lines - the command's step lines, in order.
+ * @param locale - the language the notes were written in.
+ * @param provider - the provider that wrote them.
+ * @param model - the model that wrote them.
+ * @returns the cache key.
+ */
+export function notesKey(lines: readonly string[], locale: string, provider: string, model: string): string {
+  return [locale, provider, model, ...lines].join('\u0000')
+}
+
+/** How many note sets a host keeps before evicting. */
+const NOTES_CACHE_MAX = 200
+
+/**
+ * Create the notes cache: a small LRU, because an unbounded one would grow with every
+ * command a long session runs.
+ * @param max - how many sets to keep; the least recently read is evicted first.
+ * @returns the cache.
+ */
+export function createNotesCache(max: number = NOTES_CACHE_MAX): NotesCache {
+  const entries = new Map<string, readonly (string | undefined)[]>()
+  return {
+    get(key) {
+      const hit = entries.get(key)
+      if (hit === undefined) return undefined
+      // Re-insert: `Map` iterates in insertion order, so the FIRST key is the one to evict.
+      entries.delete(key)
+      entries.set(key, hit)
+      return hit
+    },
+    set(key, notes) {
+      entries.delete(key)
+      entries.set(key, notes)
+      while (entries.size > max) {
+        const oldest = entries.keys().next().value
+        if (oldest === undefined) break
+        entries.delete(oldest)
+      }
+    },
   }
 }

@@ -108,6 +108,19 @@ export type RefusalCode =
   | 'reserved-variable'
   | 'read-only'
 
+/**
+ * The provider/model pair behind one card's notes.
+ *
+ * A card's notes are normally written while the command runs, but a command that finishes
+ * before the model answers has none persisted — the card then asks for them itself, later,
+ * and needs to know which route wrote (or may write) them. Recorded here, once per card,
+ * because the tool's own run context is long gone by the time that request is made.
+ */
+export interface NotesRoute {
+  readonly provider: string
+  readonly model: string
+}
+
 export interface ShellProgressMeta {
   /** {@link META_VERSION} at the time of writing. */
   readonly v: number
@@ -128,6 +141,8 @@ export interface ShellProgressMeta {
   readonly refused: boolean
   /** Why it was refused, when it was — absent on a command that was instrumented. */
   readonly refusedReason?: RefusalCode
+  /** The route a later request for this card's notes must use, when notes were offered. */
+  readonly notesRoute?: NotesRoute
   /** True when the consumed stream lost bytes, so attribution may be incomplete. */
   readonly partial: boolean
   /** Output produced before the first step's marker. Usually empty. */

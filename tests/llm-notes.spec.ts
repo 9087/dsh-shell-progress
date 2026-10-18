@@ -7,7 +7,7 @@
  * cleaning up before it can be shown.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { MAX_NOTE_CHARS, parseNotes, requestStepNotes, waitForNotes, type LlmLike } from '../src/llm-notes.ts'
+import { createNotesCache, MAX_NOTE_CHARS, notesKey, parseNotes, requestStepNotes, type LlmLike } from '../src/llm-notes.ts'
 
 /** A service that streams the given chunks and records the request it was given. */
 function fakeLlm(chunks: readonly unknown[] | (() => AsyncIterable<unknown>)): {
@@ -152,33 +152,33 @@ interface StepNotesRequestShape {
   readonly lines: readonly string[]
 }
 
-describe('waitForNotes', () => {
-  it('returns as soon as the notes do', async () => {
-    let done = false
-    const work = Promise.resolve().then(() => { done = true })
-    await waitForNotes(work, 10_000)
-    expect(done, 'the wait did not take the answer it was given').toBe(true)
+describe('the notes cache', () => {
+  it('keys by the command, the language AND the model that wrote it', () => {
+    const base = notesKey(['pnpm test'], 'zh-CN', 'deepseek', 'deepseek-chat')
+    expect(notesKey(['pnpm test'], 'zh-CN', 'deepseek', 'deepseek-chat')).toBe(base)
+    // A language switch must MISS: the cached sentence is in the old language.
+    expect(notesKey(['pnpm test'], 'en', 'deepseek', 'deepseek-chat')).not.toBe(base)
+    // A different model may have written a different note.
+    expect(notesKey(['pnpm test'], 'zh-CN', 'deepseek', 'deepseek-flash')).not.toBe(base)
+    // Different commands never collide, even when one is a prefix of the other.
+    expect(notesKey(['pnpm test'], 'zh-CN', 'deepseek', 'deepseek-chat')).not.toBe(
+      notesKey(['pnpm test', 'pnpm build'], 'zh-CN', 'deepseek', 'deepseek-chat'),
+    )
   })
 
-  it('never waits longer than its budget', async () => {
-    // The card must not hang on a model that never answers: a run of 1s must cost ~1s,
-    // not the model's own 8s deadline.
-    vi.useFakeTimers()
-    try {
-      let settled = false
-      const work = new Promise<void>(() => {})
-      const waiting = waitForNotes(work, 2_000).then(() => { settled = true })
-      await vi.advanceTimersByTimeAsync(1_999)
-      expect(settled, 'the wait ended before its budget').toBe(false)
-      await vi.advanceTimersByTimeAsync(1)
-      await waiting
-      expect(settled, 'the budget did not end the wait').toBe(true)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('returns what it kept, and evicts the least recently USED past the cap', () => {
+    const cache = createNotesCache(2)
+    cache.set('a', ['first'])
+    cache.set('b', ['second'])
+    expect(cache.get('a')).toEqual(['first'])
+    // Reading `a` makes `b` the least recently used, so the next insert evicts `b`.
+    cache.set('c', ['third'])
+    expect(cache.get('a')).toEqual(['first'])
+    expect(cache.get('b')).toBeUndefined()
+    expect(cache.get('c')).toEqual(['third'])
   })
 
-  it('swallows a failed request instead of failing the card', async () => {
-    await expect(waitForNotes(Promise.reject(new Error('boom')), 1_000)).resolves.toBeUndefined()
+  it('has nothing for a command it never saw', () => {
+    expect(createNotesCache().get('unknown')).toBeUndefined()
   })
 })

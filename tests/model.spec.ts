@@ -8,6 +8,7 @@ import {
   metaOf,
   viewFromLive,
   viewFromSettled,
+  withNotes,
 } from '../src/client/model.ts'
 import type { LiveSnapshot, ShellProgressMeta } from '../src/types.ts'
 
@@ -323,5 +324,56 @@ describe('block narrowing', () => {
       meta: { steps: [{ line: 1, text: 'x', output: 'y' }, { line: 'bad' }] },
     })
     expect(meta?.steps).toHaveLength(1)
+  })
+
+  it('keeps the notes ROUTE, so a card can ask for notes it never got', () => {
+    // Same trap as the refusal reason: a field left out of the field-by-field narrowing is
+    // silently lost, and the card then has no way to request its own notes at all.
+    const step = { line: 1, text: 'x', output: '', startedAt: 0, endedAt: 1 }
+    const meta = metaOf({
+      kind: 'tool-result',
+      meta: { steps: [step], notesRoute: { provider: 'deepseek', model: 'deepseek-chat' } },
+    })
+    expect(meta?.notesRoute).toEqual({ provider: 'deepseek', model: 'deepseek-chat' })
+    // A route missing either half is not usable: asking with it would fail, quietly.
+    expect(metaOf({ kind: 'tool-result', meta: { steps: [step], notesRoute: { provider: 'deepseek' } } })?.notesRoute).toBeUndefined()
+    expect(metaOf({ kind: 'tool-result', meta: { steps: [step], notesRoute: { provider: '', model: 'x' } } })?.notesRoute).toBeUndefined()
+    expect(metaOf({ kind: 'tool-result', meta: { steps: [step], notesRoute: 'nonsense' } })?.notesRoute).toBeUndefined()
+  })
+})
+
+describe('withNotes', () => {
+  /** A settled view whose steps carry no notes at all. */
+  const bare = () => viewFromSettled({
+    v: 1,
+    instrumented: true,
+    refused: false,
+    partial: false,
+    preamble: '',
+    steps: [
+      { line: 1, text: 'pnpm test', output: '', startedAt: 0, endedAt: 5 },
+      { line: 2, text: 'pnpm build', output: '', startedAt: 5, endedAt: 9 },
+    ],
+  }, false)
+
+  it('fills the lines that had no note', () => {
+    const view = withNotes(bare(), ['跑测试', undefined])
+    expect(view.steps.map((step) => step.note)).toEqual(['跑测试', undefined])
+  })
+
+  it('never overwrites a note the reader has already seen', () => {
+    // The persisted note and the late one come from the same model and instruction; a
+    // re-rolled sentence would flicker for nothing.
+    const original = bare()
+    const withNote = {
+      ...original,
+      steps: original.steps.map((step, index) => index === 0 ? { ...step, note: '已有' } : step),
+    }
+    expect(withNotes(withNote, ['迟到的', '构建']).steps.map((step) => step.note)).toEqual(['已有', '构建'])
+  })
+
+  it('returns the SAME object when the answer adds nothing', () => {
+    const view = bare()
+    expect(withNotes(view, [undefined, undefined])).toBe(view)
   })
 })

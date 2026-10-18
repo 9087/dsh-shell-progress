@@ -54,12 +54,12 @@ import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
 import type { SplitResult, Step } from './split.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
-import type { LiveSnapshot, RefusalCode, ShellProgressMeta } from './types.ts'
+import type { LiveSnapshot, NotesRoute, RefusalCode, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
 import { StepTracker } from './tracker.ts'
-import { requestStepNotes, waitForNotes } from './llm-notes.ts'
+import { createNotesCache, notesKey, requestStepNotes } from './llm-notes.ts'
 import type { LlmLike } from './llm-notes.ts'
 
 /** Stable Cordis plugin name. */
@@ -96,15 +96,22 @@ const notesConfig: { enabled: boolean; locale: string | undefined } = { enabled:
 const notesDiagnosed = new Set<string>()
 
 /**
- * How long a FINISHED command may be held to collect notes that are still in flight.
+ * Note sets already written, by command + language + model.
  *
- * The card's metadata is frozen when the command ends, so a note that lands afterwards is
- * invisible however good it is — and a one-second command finishes long before the model
- * answers. The request went out beside the command, so this is a grace period rather than a
- * wait for a request: two seconds covers a normal answer, and a slow or dead model costs a
- * fast card no more than that.
+ * A session runs the same handful of commands all day (`pnpm test`, `git status`, a build
+ * script); without this every one of them would pay a model call, twice over once the card
+ * can ask for notes itself.
  */
-const NOTES_SETTLE_WAIT_MS = 2_000
+const notesCache = createNotesCache()
+
+/**
+ * The budget a LAZY notes request gets.
+ *
+ * The in-run request shares the command's own runtime and therefore needs no budget of its
+ * own; a request made from a quiet, already-settled card has nothing to share with, so it is
+ * bounded here — a card that waits forever for a note is worse than a card without one.
+ */
+const LAZY_NOTES_TIMEOUT_MS = 6_000
 
 /**
  * Set the note preference pushed by the client.
@@ -133,6 +140,50 @@ function notesRoute(exec: { readonly agent?: unknown }): { readonly provider: st
   if (typeof provider !== 'string' || provider.length === 0) return undefined
   if (typeof model !== 'string' || model.length === 0) return undefined
   return { provider, model }
+}
+
+/** One lazy request for notes, as the card sends it: the lines, the language, and the route. */
+interface LazyNotesRequest {
+  readonly lines: readonly string[]
+  readonly locale: string
+  readonly provider: string
+  readonly model: string
+}
+
+/** The most lines one lazy request may carry; a card that needs more is not a card. */
+const MAX_LAZY_LINES = 400
+
+/**
+ * Validate a lazy notes request off the wire.
+ * @param payload - the raw request payload.
+ * @returns the request, or `undefined` when anything about it is unusable.
+ */
+function notesRequestOf(payload: unknown): LazyNotesRequest | undefined {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
+  const record = payload as Record<string, unknown>
+  const lines = record.lines
+  if (!Array.isArray(lines) || lines.length === 0 || lines.length > MAX_LAZY_LINES) return undefined
+  const strings: string[] = []
+  for (const line of lines) {
+    if (typeof line !== 'string') return undefined
+    strings.push(line)
+  }
+  const locale = record.locale
+  const provider = record.provider
+  const model = record.model
+  if (typeof locale !== 'string' || locale.length === 0) return undefined
+  if (typeof provider !== 'string' || provider.length === 0) return undefined
+  if (typeof model !== 'string' || model.length === 0) return undefined
+  return { lines: strings, locale, provider, model }
+}
+
+/**
+ * Notes as the wire carries them: JSON has no `undefined`, so a missing note is `null`.
+ * @param notes - one entry per line, `undefined` where the model named no note.
+ * @returns the same list with holes as null.
+ */
+function wireNotes(notes: readonly (string | undefined)[]): readonly (string | null)[] {
+  return notes.map((note) => note ?? null)
 }
 
 /** Configuration for the step-progress tool. */
@@ -308,6 +359,16 @@ const OUTPUT_SCHEMA = {
         // NOT required: a record persisted before this field existed still validates, and the
         // card simply shows the generic sentence instead of a reason.
         refusedReason: { type: 'string' },
+        // NOT required: a card written before notes existed, or by a host with no route,
+        // simply has no lazy hint — the card then asks for nothing.
+        notesRoute: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            provider: { type: 'string', required: true },
+            model: { type: 'string', required: true },
+          },
+        },
         partial: { type: 'boolean', required: true },
         preamble: { type: 'string', required: true },
         steps: {
@@ -522,6 +583,30 @@ export function apply(ctx: Context, config: Config = {}): void {
         })
         return { ok: true, value: { enabled: notesConfig.enabled, locale: notesConfig.locale ?? null } }
       }
+      // A card asking for notes it does not have. Deliberately NOT a snapshot verb: it costs
+      // a model call, so it is asked for at most once per card and never polled. A cached
+      // command (the common case: the same `pnpm test` again) answers without the model.
+      if (endpoint === 'notes') {
+        if (!notesConfig.enabled) return { ok: true, value: { notes: null } }
+        const request = notesRequestOf(payload)
+        if (request === undefined) return { ok: true, value: { notes: null } }
+        const key = notesKey(request.lines, request.locale, request.provider, request.model)
+        const cached = notesCache.get(key)
+        if (cached !== undefined) return { ok: true, value: { notes: wireNotes(cached) } }
+        const llm = ctx.get('llm') as LlmLike | undefined
+        if (llm === undefined) return { ok: true, value: { notes: null } }
+        const answer = await requestStepNotes({
+          llm,
+          provider: request.provider,
+          model: request.model,
+          locale: request.locale,
+          lines: request.lines,
+          timeoutMs: LAZY_NOTES_TIMEOUT_MS,
+        })
+        if (answer === undefined) return { ok: true, value: { notes: null } }
+        notesCache.set(key, answer)
+        return { ok: true, value: { notes: wireNotes(answer) } }
+      }
       if (endpoint !== 'snapshot') return rpcError(`unknown endpoint ${JSON.stringify(endpoint)}`)
       const callId = typeof payload === 'object' && payload !== null && !Array.isArray(payload)
         ? (payload as { readonly callId?: unknown }).callId
@@ -644,17 +729,15 @@ export function apply(ctx: Context, config: Config = {}): void {
 
         // ONE LINE PER STEP, WRITTEN BY THE MODEL, in the reader's own language.
         //
-        // Deliberately NOT awaited before the run starts: a command must never wait for its
-        // own description. The request goes out beside the command, and the answer is
-        // attached to the tracker when it lands, so the client's next snapshot poll carries
-        // it. Cancellation rides on `exec.signal`, so a run that ends takes its request with
-        // it — and every failure is silent by construction (`requestStepNotes` answers
-        // undefined), which is what keeps a convenience out of the card's correctness.
+        // FIRED, NEVER AWAITED: a command must never wait for its own description. The answer
+        // is attached to the tracker when it lands, so the client's next poll carries it — and
+        // a note that lands after the card's metadata was frozen is not lost either: the card
+        // asks for it itself the first time the reader opens or hovers it (the `notes`
+        // endpoint below). Nothing here may hold the turn for the model.
         //
-        // The request IS awaited (bounded) once the command has finished — see
-        // `NOTES_SETTLE_WAIT_MS`: the card's metadata is frozen at that point, and a short
-        // command would otherwise lose the answer that is still on its way.
-        let notesSettle: Promise<unknown> | undefined
+        // CACHED BY COMMAND: the same lines in the same language and model never ask twice, so
+        // a repeated `pnpm test` is free.
+        let cardNotesRoute: NotesRoute | undefined
         if (notesConfig.enabled && steps.length > 0) {
           const route = notesRoute(exec)
           const locale = notesConfig.locale
@@ -671,21 +754,31 @@ export function apply(ctx: Context, config: Config = {}): void {
           else if (route === undefined) complain('the agent carries no provider/model route')
           else if (llm === undefined) complain('this host has no llm service')
           else {
-            const notes = requestStepNotes({
-              llm,
-              provider: route.provider,
-              model: route.model,
-              locale,
-              lines: steps.map((step) => step.text),
-              signal: exec.signal,
-            })
-            notesSettle = notes.then((answer) => {
-              if (answer === undefined) {
-                complain('the model call produced no notes: a refusal, a timeout or an empty answer')
-                return
-              }
-              entry.tracker.setNotes(answer)
-            })
+            // Persisted on the card so a LATER request knows which route wrote these lines —
+            // the tool's own run context is long gone by the time a card asks.
+            cardNotesRoute = { provider: route.provider, model: route.model }
+            const lines = steps.map((step) => step.text)
+            const key = notesKey(lines, locale, route.provider, route.model)
+            const cached = notesCache.get(key)
+            if (cached !== undefined) entry.tracker.setNotes(cached)
+            else {
+              const notes = requestStepNotes({
+                llm,
+                provider: route.provider,
+                model: route.model,
+                locale,
+                lines,
+                signal: exec.signal,
+              })
+              void notes.then((answer) => {
+                if (answer === undefined) {
+                  complain('the model call produced no notes: a refusal, a timeout or an empty answer')
+                  return
+                }
+                notesCache.set(key, answer)
+                entry.tracker.setNotes(answer)
+              })
+            }
           }
         }
 
@@ -735,18 +828,15 @@ export function apply(ctx: Context, config: Config = {}): void {
           entry.tracker.observe({ kind: 'text', text: result.stderr.text })
         }
 
-        // THE CARD'S METADATA IS FROZEN HERE. A note still in flight has to land BEFORE this
-        // line or it is invisible forever — the client reads the settled record, not the live
-        // one — and a one-second command always ends before the model answers. The request
-        // went out with the command, so this normally returns at once; the budget is what
-        // keeps a slow or dead model from holding a fast card for longer.
-        if (notesSettle !== undefined) await waitForNotes(notesSettle, NOTES_SETTLE_WAIT_MS)
-
+        // A note still in flight is NOT waited for here. Whatever misses this snapshot is
+        // recovered by the card's own lazy request (`notes` endpoint), so no turn ever pays
+        // for the model's latency.
         const progress: ShellProgressMeta = {
           v: META_VERSION,
           instrumented,
           refused,
           ...refused && refusal !== undefined ? { refusedReason: refusal.code } : {},
+          ...cardNotesRoute === undefined ? {} : { notesRoute: cardNotesRoute },
           partial: lossy || entry.tracker.droppedOutput(),
           preamble: entry.tracker.preamble(),
           // The canonical value is validated against the output schema, which
