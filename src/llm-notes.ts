@@ -44,6 +44,15 @@ export interface LlmLike {
       readonly content: readonly { readonly type: string; readonly text?: string }[]
     }[]
     readonly maxTokens?: number
+    /**
+     * The adapter-owned reasoning effort for this exact model.
+     *
+     * A note is one short line, so the notes request asks for `off`: the model's configured
+     * effort (this host runs `high`) spends its whole budget — and many seconds — thinking
+     * about a sentence the reader wants immediately, and with a small `maxTokens` the visible
+     * answer can end up empty. The harness's own auxiliary calls (session titles) do the same.
+     */
+    readonly reasoningEffort?: string
     readonly signal?: AbortSignal
   }): AsyncIterable<unknown>
 }
@@ -64,16 +73,29 @@ export interface StepNotesRequest {
   readonly signal?: AbortSignal
   /** How long to wait before giving up. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   readonly timeoutMs?: number
+  /**
+   * Called ONCE with the reason the notes could not be written.
+   *
+   * A note is a convenience, so its absence is silent by design — but "silent" made a broken
+   * call indistinguishable from a model that simply had nothing to say. The card records this
+   * reason in its metadata, which is the only place a reader (or a maintainer) can look it up
+   * without a host log.
+   * @param reason - why no note was produced.
+   */
+  readonly onFailure?: (reason: NotesFailure) => void
 }
 
+/** Why a note request produced nothing. */
+export type NotesFailure = 'aborted' | 'timeout' | 'threw' | 'empty'
+
 /** A note is one short line; a slow model is worse than no note. */
-export const DEFAULT_TIMEOUT_MS = 8_000
+export const DEFAULT_TIMEOUT_MS = 20_000
 
 /** Long enough for a sentence, short enough that the answer cannot become an essay. */
 export const MAX_NOTE_CHARS = 60
 
 /** How many tokens the whole answer may take: one short line per command, plus slack. */
-const MAX_ANSWER_TOKENS = 512
+const MAX_ANSWER_TOKENS = 1_024
 
 /**
  * The instruction.
@@ -114,13 +136,26 @@ function systemPrompt(count: number, locale: string): string {
 
 /**
  * Read one chunk's text, whatever field the host's adapter put it in.
+ *
+ * ONLY VISIBLE TEXT. The adapter's protocol carries `text-delta` and `reasoning-delta` chunks
+ * with the SAME `text` field, so a reader that ignores the type concatenates the model's own
+ * thinking into the answer: the reasoning is far longer than the notes, may contain
+ * numbered-looking lines, and — on a host whose configured effort is `high` — is most of what
+ * the model spends. A note must be the answer, never the deliberation.
  * @param chunk - a chunk from the stream.
  * @returns its text, or `''` when the chunk carries none.
  */
 function liveText(chunk: unknown): string {
   if (typeof chunk === 'string') return chunk
   if (typeof chunk !== 'object' || chunk === null) return ''
-  const record = chunk as { readonly text?: unknown; readonly delta?: unknown; readonly content?: unknown }
+  const record = chunk as {
+    readonly type?: unknown
+    readonly text?: unknown
+    readonly delta?: unknown
+    readonly content?: unknown
+  }
+  // Reasoning is explicitly NOT text for this purpose — see the doc comment.
+  if (record.type === 'reasoning-delta') return ''
   if (typeof record.text === 'string') return record.text
   const delta = record.delta as { readonly text?: unknown } | undefined
   if (typeof delta === 'object' && delta !== null && typeof delta.text === 'string') return delta.text
@@ -165,14 +200,29 @@ export function parseNotes(answer: string, count: number): readonly (string | un
  * @returns the notes in command-line order, or `undefined` when there are none to show.
  */
 export async function requestStepNotes(request: StepNotesRequest): Promise<readonly (string | undefined)[] | undefined> {
-  const { llm, lines, timeoutMs = DEFAULT_TIMEOUT_MS } = request
+  const { llm, lines, timeoutMs = DEFAULT_TIMEOUT_MS, onFailure } = request
   if (llm === undefined || lines.length === 0) return undefined
+  // A run that has ALREADY ended must not make a request: an AbortSignal that was aborted
+  // before a listener was attached never fires that listener, so this is checked explicitly.
+  if (request.signal?.aborted === true) {
+    onFailure?.('aborted')
+    return undefined
+  }
   // The caller's own cancellation (the run ended) and the deadline both have to be able to
-  // stop the call, so they are combined into the signal the stream is given.
+  // stop the call, so they are combined into the signal the stream is given. WHICH one fired
+  // is tracked, because it is the only clue a reader gets when a card shows no note.
   const controller = new AbortController()
-  const abort = (): void => { controller.abort() }
-  request.signal?.addEventListener('abort', abort, { once: true })
-  const deadline = setTimeout(abort, timeoutMs)
+  let externalAbort = false
+  let deadlineHit = false
+  const stopExternal = (): void => {
+    externalAbort = true
+    controller.abort()
+  }
+  request.signal?.addEventListener('abort', stopExternal, { once: true })
+  const deadline = setTimeout(() => {
+    deadlineHit = true
+    controller.abort()
+  }, timeoutMs)
   try {
     const user = lines.map((line, index) => `${String(index + 1)}: ${line}`).join('\n')
     const stream = llm.stream({
@@ -181,6 +231,8 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
       system: systemPrompt(lines.length, request.locale),
       messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
       maxTokens: MAX_ANSWER_TOKENS,
+      // A note is one sentence: thinking about it costs seconds and the answer's budget.
+      reasoningEffort: 'off',
       signal: controller.signal,
     })
     let answer = ''
@@ -196,14 +248,22 @@ export async function requestStepNotes(request: StepNotesRequest): Promise<reado
       controller.signal.addEventListener('abort', () => { resolve(undefined) }, { once: true })
     })
     const notes = await Promise.race([consume, stopped])
-    if (notes === undefined) return undefined
+    if (notes === undefined) {
+      onFailure?.(externalAbort ? 'aborted' : deadlineHit ? 'timeout' : 'aborted')
+      return undefined
+    }
     // Every step missing a note is the same answer as no notes at all: show nothing.
-    return notes.some((note) => note !== undefined) ? notes : undefined
+    if (!notes.some((note) => note !== undefined)) {
+      onFailure?.('empty')
+      return undefined
+    }
+    return notes
   } catch {
+    onFailure?.('threw')
     return undefined
   } finally {
     clearTimeout(deadline)
-    request.signal?.removeEventListener('abort', abort)
+    request.signal?.removeEventListener('abort', stopExternal)
   }
 }
 

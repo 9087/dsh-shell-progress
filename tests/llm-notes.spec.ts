@@ -12,15 +12,28 @@ import { createNotesCache, MAX_NOTE_CHARS, notesKey, parseNotes, requestStepNote
 /** A service that streams the given chunks and records the request it was given. */
 function fakeLlm(chunks: readonly unknown[] | (() => AsyncIterable<unknown>)): {
   readonly llm: LlmLike
-  readonly calls: { provider: string; model: string; system?: string; messages: readonly unknown[] }[]
+  readonly calls: {
+    provider: string
+    model: string
+    system?: string
+    reasoningEffort?: string
+    messages: readonly unknown[]
+  }[]
 } {
-  const calls: { provider: string; model: string; system?: string; messages: readonly unknown[] }[] = []
+  const calls: {
+    provider: string
+    model: string
+    system?: string
+    reasoningEffort?: string
+    messages: readonly unknown[]
+  }[] = []
   const llm: LlmLike = {
     stream(options) {
       calls.push({
         provider: options.provider,
         model: options.model,
         ...(options.system === undefined ? {} : { system: options.system }),
+        ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }),
         messages: options.messages,
       })
       if (typeof chunks === 'function') return chunks()
@@ -180,5 +193,72 @@ describe('the notes cache', () => {
 
   it('has nothing for a command it never saw', () => {
     expect(createNotesCache().get('unknown')).toBeUndefined()
+  })
+})
+
+describe('what the notes request asks for, and reports', () => {
+  it('ignores the model\'s reasoning and keeps only its visible text', async () => {
+    // The adapter's protocol carries BOTH `reasoning-delta` and `text-delta` chunks with the
+    // same `text` field. Reading both put the model's deliberation into the answer — longer
+    // than the notes, sometimes numbered, and on a `high`-effort host most of the tokens.
+    const { llm } = fakeLlm([
+      { type: 'reasoning-delta', index: 0, text: '1: this is my thinking, not a note\n' },
+      { type: 'text-delta', index: 1, text: '1: 安装依赖\n2: 构建产物' },
+    ])
+    expect(await requestStepNotes({ ...base, llm })).toEqual(['安装依赖', '构建产物'])
+  })
+
+  it('asks for no thinking: one sentence is not worth the reasoning budget', async () => {
+    const { llm, calls } = fakeLlm([{ type: 'text-delta', index: 0, text: '1: 安装依赖' }])
+    await requestStepNotes({ ...base, llm })
+    expect(calls[0]?.reasoningEffort).toBe('off')
+  })
+
+  it('reports an empty answer, a thrown stream, and a cancelled run', async () => {
+    const empty: string[] = []
+    const emptyAnswer = fakeLlm([{ type: 'text-delta', index: 0, text: 'no numbered line here' }])
+    expect(await requestStepNotes({ ...base, llm: emptyAnswer.llm, onFailure: (reason) => empty.push(reason) })).toBeUndefined()
+    expect(empty).toEqual(['empty'])
+
+    const thrown: string[] = []
+    const throwing = fakeLlm(() => (async function* generate(): AsyncGenerator<unknown> {
+      throw new Error('adapter exploded')
+    })())
+    expect(await requestStepNotes({ ...base, llm: throwing.llm, onFailure: (reason) => thrown.push(reason) })).toBeUndefined()
+    expect(thrown).toEqual(['threw'])
+
+    const aborted = new AbortController()
+    aborted.abort()
+    const cancelled: string[] = []
+    const cancelledAnswer = fakeLlm([{ type: 'text-delta', index: 0, text: '1: 安装依赖' }])
+    expect(await requestStepNotes({
+      ...base,
+      llm: cancelledAnswer.llm,
+      signal: aborted.signal,
+      onFailure: (reason) => cancelled.push(reason),
+    })).toBeUndefined()
+    expect(cancelled).toEqual(['aborted'])
+  })
+
+  it('reports its own deadline as a timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const never = fakeLlm(() => (async function* generate(): AsyncGenerator<unknown> {
+        await new Promise(() => {})
+        yield { type: 'text-delta', index: 0, text: '1: never' }
+      })())
+      const reasons: string[] = []
+      const pending = requestStepNotes({
+        ...base,
+        llm: never.llm,
+        timeoutMs: 50,
+        onFailure: (reason) => reasons.push(reason),
+      })
+      await vi.advanceTimersByTimeAsync(60)
+      expect(await pending).toBeUndefined()
+      expect(reasons).toEqual(['timeout'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

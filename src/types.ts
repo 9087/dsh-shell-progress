@@ -121,6 +121,17 @@ export interface NotesRoute {
   readonly model: string
 }
 
+/**
+ * How one card's note request ended.
+ *
+ * TEMPORARY DIAGNOSTIC. A note is silent by design, which makes "the model had nothing to
+ * say" and "our request never came back" look identical from the card — and a host's log is
+ * not something a reader can open. Recording the outcome in the persisted metadata makes the
+ * next failure diagnosable from the session log alone. `'ok'` means notes were written; every
+ * other value is the reason they were not.
+ */
+export type NotesState = 'ok' | 'aborted' | 'timeout' | 'threw' | 'empty'
+
 export interface ShellProgressMeta {
   /** {@link META_VERSION} at the time of writing. */
   readonly v: number
@@ -143,6 +154,8 @@ export interface ShellProgressMeta {
   readonly refusedReason?: RefusalCode
   /** The route a later request for this card's notes must use, when notes were offered. */
   readonly notesRoute?: NotesRoute
+  /** How the note request ended, when one was made (see {@link NotesState}). */
+  readonly notesState?: NotesState
   /** True when the consumed stream lost bytes, so attribution may be incomplete. */
   readonly partial: boolean
   /** Output produced before the first step's marker. Usually empty. */

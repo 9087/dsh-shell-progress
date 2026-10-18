@@ -54,7 +54,7 @@ import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
 import type { SplitResult, Step } from './split.ts'
 import { META_VERSION, PROGRESS_CHANNEL } from './types.ts'
-import type { LiveSnapshot, NotesRoute, RefusalCode, ShellProgressMeta } from './types.ts'
+import type { LiveSnapshot, NotesRoute, NotesState, RefusalCode, ShellProgressMeta } from './types.ts'
 import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
@@ -111,7 +111,7 @@ const notesCache = createNotesCache()
  * own; a request made from a quiet, already-settled card has nothing to share with, so it is
  * bounded here — a card that waits forever for a note is worse than a card without one.
  */
-const LAZY_NOTES_TIMEOUT_MS = 6_000
+const LAZY_NOTES_TIMEOUT_MS = 20_000
 
 /**
  * Set the note preference pushed by the client.
@@ -369,6 +369,8 @@ const OUTPUT_SCHEMA = {
             model: { type: 'string', required: true },
           },
         },
+        // TEMPORARY DIAGNOSTIC (see `NotesState`): 'ok' or the reason no note was written.
+        notesState: { type: 'string' },
         partial: { type: 'boolean', required: true },
         preamble: { type: 'string', required: true },
         steps: {
@@ -738,6 +740,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         // CACHED BY COMMAND: the same lines in the same language and model never ask twice, so
         // a repeated `pnpm test` is free.
         let cardNotesRoute: NotesRoute | undefined
+        // TEMPORARY DIAGNOSTIC: how the note request ended, persisted with the card so a
+        // missing note can be explained from the session log instead of a host's terminal.
+        let cardNotesState: NotesState | undefined
         if (notesConfig.enabled && steps.length > 0) {
           const route = notesRoute(exec)
           const locale = notesConfig.locale
@@ -760,8 +765,10 @@ export function apply(ctx: Context, config: Config = {}): void {
             const lines = steps.map((step) => step.text)
             const key = notesKey(lines, locale, route.provider, route.model)
             const cached = notesCache.get(key)
-            if (cached !== undefined) entry.tracker.setNotes(cached)
-            else {
+            if (cached !== undefined) {
+              entry.tracker.setNotes(cached)
+              cardNotesState = 'ok'
+            } else {
               const notes = requestStepNotes({
                 llm,
                 provider: route.provider,
@@ -769,12 +776,14 @@ export function apply(ctx: Context, config: Config = {}): void {
                 locale,
                 lines,
                 signal: exec.signal,
+                onFailure: (reason) => {
+                  cardNotesState = reason
+                  complain(`the model call produced no notes: ${reason}`)
+                },
               })
               void notes.then((answer) => {
-                if (answer === undefined) {
-                  complain('the model call produced no notes: a refusal, a timeout or an empty answer')
-                  return
-                }
+                if (answer === undefined) return
+                cardNotesState = 'ok'
                 notesCache.set(key, answer)
                 entry.tracker.setNotes(answer)
               })
@@ -837,6 +846,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           refused,
           ...refused && refusal !== undefined ? { refusedReason: refusal.code } : {},
           ...cardNotesRoute === undefined ? {} : { notesRoute: cardNotesRoute },
+          ...cardNotesState === undefined ? {} : { notesState: cardNotesState },
           partial: lossy || entry.tracker.droppedOutput(),
           preamble: entry.tracker.preamble(),
           // The canonical value is validated against the output schema, which
