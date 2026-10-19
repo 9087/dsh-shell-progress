@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.1](https://github.com/9087/dsh-shell-progress/compare/v0.6.0...v0.6.1) (2026-10-19)
+
+### Bug Fixes
+
+* **tools:** make the description carry the reason to prefer this tool ([c5a78e6](https://github.com/9087/dsh-shell-progress/commit/c5a78e6cbbf6f5ac381d559ed12ce7ed5cabe023))
+
 ## [0.6.0](https://github.com/9087/dsh-shell-progress/compare/v0.5.0...v0.6.0) (2026-10-18)
 
 ### Features
