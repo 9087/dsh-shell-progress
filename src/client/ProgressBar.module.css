@@ -110,8 +110,7 @@
   background-color: var(--step-state-slow, currentColor);
 }
 
-.segment[data-phase='done'][data-tone='overdue'],
-.segment[data-phase='failed'] {
+.segment[data-phase='done'][data-tone='overdue'] {
   background-color: var(--step-state-error, currentColor);
 }
 

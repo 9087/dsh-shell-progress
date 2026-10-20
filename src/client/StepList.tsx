@@ -44,7 +44,6 @@ export interface StepListLabels {
   readonly statusDone: string
   readonly statusRunning: string
   readonly statusPending: string
-  readonly statusFailed: string
 }
 
 /**
@@ -161,9 +160,7 @@ export function StepList({ view, toolName, labels, hoveredIndex, onHoverStep }: 
     ? labels.statusRunning
     : phase === 'done'
       ? labels.statusDone
-      : phase === 'failed'
-        ? labels.statusFailed
-        : labels.statusPending
+      : labels.statusPending
 
   return (
     <div className={styles.list}>

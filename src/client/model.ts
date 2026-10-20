@@ -91,8 +91,9 @@ export function durationTone(milliseconds: number): DurationTone {
   return 'normal'
 }
 
-/** What a step is doing now. */
-export type StepPhase = 'pending' | 'running' | 'done' | 'failed'
+/** What a step is doing now. There is no "failed" phase: a non-zero exit is a normal
+ * result, and a call that THROWS carries no persisted steps at all. */
+export type StepPhase = 'pending' | 'running' | 'done'
 
 /** One rendered step. */
 export interface StepRow {
@@ -203,7 +204,6 @@ function assembleRows(
     readonly notesRoute?: NotesRoute
     readonly partial: boolean
     readonly preamble: string
-    readonly failedIndex: number
   },
 ): ProgressView {
   let done = 0
@@ -219,7 +219,7 @@ function assembleRows(
     const phase: StepPhase = isCurrent
       ? 'running'
       : finished
-        ? (index === state.failedIndex ? 'failed' : 'done')
+        ? 'done'
         : row.startedAt !== null
           ? 'running'
           : 'pending'
@@ -263,12 +263,10 @@ function assembleRows(
  * REFUSED call's metadata is present and carries zero steps, which is a
  * different fact — the refusal flag comes with it and drives the notice.
  * @param meta - the narrowed `presentationMeta`, when the call carried one.
- * @param isError - whether the call itself failed, so the last started step can be marked.
  * @returns the renderable view.
  */
 export function viewFromSettled(
   meta: ShellProgressMeta | undefined,
-  isError: boolean,
 ): ProgressView {
   const rows: Row[] = (meta?.steps ?? []).map((step) => ({
     line: step.line,
@@ -280,13 +278,6 @@ export function viewFromSettled(
     startedAt: step.startedAt,
     endedAt: step.endedAt,
   }))
-  // The failing step is not recorded per step, so the last step that started
-  // carries the mark; an untouched tail stays "not started", which is the
-  // honest reading.
-  let lastStarted = -1
-  rows.forEach((row, index) => {
-    if (row.startedAt !== null) lastStarted = index
-  })
   return assembleRows(rows, {
     running: false,
     currentIndex: -1,
@@ -297,7 +288,6 @@ export function viewFromSettled(
     ...meta?.notesRoute === undefined ? {} : { notesRoute: meta.notesRoute },
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
-    failedIndex: isError ? lastStarted : -1,
     totalElapsedMs: meta?.elapsedMs ?? 0,
   })
 }
@@ -325,7 +315,6 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
       refused: false,
       partial: false,
       preamble: '',
-      failedIndex: -1,
     })
   }
   const rows: Row[] = live.steps.map((step) => ({
@@ -360,7 +349,6 @@ export function viewFromLive(live: LiveSnapshot | undefined): ProgressView {
     ...live.refusedReason === null ? {} : { refusedReason: live.refusedReason },
     partial: live.partial,
     preamble: live.preamble,
-    failedIndex: -1,
   })
 }
 
@@ -392,11 +380,6 @@ export function isSettledBlock(block: unknown): boolean {
   if (record.kind === 'tool-result') return true
   // A block carrying the tool message payload is settled even without the tag.
   return 'content' in record || 'result' in record
-}
-
-/** Whether a settled block reports failure. */
-export function isErrorBlock(block: unknown): boolean {
-  return typeof block === 'object' && block !== null && (block as { isError?: unknown }).isError === true
 }
 
 /** Parse one `argsRaw` string, tolerating the truncation a live call can carry. */

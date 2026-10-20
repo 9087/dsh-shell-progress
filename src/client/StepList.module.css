@@ -165,10 +165,6 @@
   background-color: var(--step-state-error, currentColor);
 }
 
-.row[data-phase='failed'] .dot {
-  background-color: var(--step-state-error, currentColor);
-}
-
 /* A step that has not run yet keeps its command line at FULL strength, exactly like the
  * ones that have. The line used to be faded to 50% here, on the reasoning that the list
  * is a record of what RAN — but a command the reader is about to watch run is content,

@@ -60,7 +60,6 @@ export const en = {
   'status.done': 'Done',
   'status.running': 'Running',
   'status.pending': 'Not started',
-  'status.failed': 'Finished after an error',
   /* The DSH Settings section. The label names the PLUGIN, the way the shell names every other
    * section after the feature it configures rather than after one of its rows. */
   'settings.tabLabel': 'Shell Progress',
@@ -103,7 +102,6 @@ export const zh: Record<keyof typeof en, string> = {
   'status.done': '已完成',
   'status.running': '执行中',
   'status.pending': '未开始',
-  'status.failed': '执行结束但有错误',
   'settings.tabLabel': '命令进度',
   'settings.notes': '生成命令步骤说明',
   'settings.notesDesc': '为每条命令步骤写一行简短说明，显示在步骤悬停卡片中该行代码的上方。（每条命令需要额外一次模型调用，命令文本会发送给模型）',

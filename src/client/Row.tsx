@@ -39,7 +39,7 @@ import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
 import { PlainBody, StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
-import { argsOf, formatTotal, isErrorBlock, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
+import { argsOf, formatTotal, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
 import type { ProgressView } from './model.ts'
 import { markNotesAsked, notesAsked, rememberNotes, rememberedNotes } from './lazy-notes.ts'
 import { notesEnabled } from './notes-preference.ts'
@@ -179,7 +179,6 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   )
 
   const settled = isSettledBlock(block)
-  const failed = isErrorBlock(block)
   const args = argsOf(block)
   const live = useProgress((snapshot: ProgressSnapshot) => snapshot.calls[callId])
 
@@ -195,7 +194,7 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   }, [callId, settled, watchCall])
 
   const recorded: ProgressView = settled
-    ? viewFromSettled(metaOf(block), failed)
+    ? viewFromSettled(metaOf(block))
     : viewFromLive(live as LiveSnapshot | undefined)
   const view: ProgressView = lazyNotes === undefined ? recorded : withNotes(recorded, lazyNotes)
 
@@ -239,7 +238,6 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
     statusDone: t('status.done'),
     statusRunning: t('status.running'),
     statusPending: t('status.pending'),
-    statusFailed: t('status.failed'),
   }
 
   // The only notice left is about LOST OUTPUT. The refusal itself is now said twice: the

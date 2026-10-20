@@ -4,7 +4,6 @@ import {
   barShape,
   durationTone,
   formatTotal,
-  isErrorBlock,
   isSettledBlock,
   metaOf,
   viewFromLive,
@@ -149,7 +148,7 @@ describe('viewFromSettled', () => {
   }
 
   it('derives durations from the persisted timings, with no live source', () => {
-    const view = viewFromSettled(meta, false)
+    const view = viewFromSettled(meta)
     expect(view.running).toBe(false)
     expect(view.steps.map((step) => step.durationMs)).toEqual([120, 780])
     expect(view.steps.map((step) => step.phase)).toEqual(['done', 'done'])
@@ -161,7 +160,7 @@ describe('viewFromSettled', () => {
     const view = viewFromSettled({
       ...meta,
       steps: [{ line: 1, text: '$a = 1', output: '', startedAt: 0, endedAt: 6_000 }],
-    }, false)
+    })
     expect(view.steps[0]?.tone).toBe('slow')
   })
 
@@ -169,17 +168,12 @@ describe('viewFromSettled', () => {
     // An old persisted record, or a host that recorded nothing. The card shows
     // its header and the shell's own result output; it does NOT re-derive the
     // command's shape — that was the guess this change removed.
-    const view = viewFromSettled(undefined, false)
+    const view = viewFromSettled(undefined)
     expect(view.instrumented).toBe(false)
     expect(view.refused).toBe(false)
     expect(view.steps).toEqual([])
     expect(view.total).toBe(0)
     expect(view.bar).toBe('none')
-  })
-
-  it('marks the last started step when the call failed', () => {
-    const view = viewFromSettled(meta, true)
-    expect(view.steps[1]?.phase).toBe('failed')
   })
 
   it('leaves a step the command never reached as pending', () => {
@@ -189,7 +183,7 @@ describe('viewFromSettled', () => {
         { line: 1, text: '$a = 1', output: '', startedAt: 0, endedAt: 5 },
         { line: 5, text: 'Write-Output $a', output: '', startedAt: null, endedAt: null },
       ],
-    }, false)
+    })
     expect(view.steps[1]?.phase).toBe('pending')
   })
 
@@ -199,7 +193,6 @@ describe('viewFromSettled', () => {
     // notice) to no notice at all.
     const view = viewFromSettled(
       { v: 1, instrumented: false, refused: true, partial: false, preamble: '', steps: [] },
-      false,
     )
     expect(view.refused).toBe(true)
     expect(view.instrumented).toBe(false)
@@ -229,7 +222,7 @@ describe('viewFromSettled', () => {
       partial: false,
       preamble: '',
       steps: [{ line: 1, text: "Write-Output 'one'", output: 'one', startedAt: 0, endedAt: 5 }],
-    }, false)
+    })
     expect(view.refused).toBe(false)
     expect(view.instrumented).toBe(false)
     expect(view.total).toBe(1)
@@ -248,7 +241,7 @@ describe('viewFromSettled', () => {
       partial: true,
       preamble: '',
       steps: [{ line: 1, text: 'chatty', output: 'kept', droppedChars: 1234, startedAt: 0, endedAt: 5 }],
-    }, false)
+    })
     expect(truncated.steps[0]?.droppedChars).toBe(1234)
     // A record persisted BEFORE the field existed reads as a step that lost nothing,
     // which is what keeps an already-written session rendering exactly as it did.
@@ -259,7 +252,7 @@ describe('viewFromSettled', () => {
       partial: false,
       preamble: '',
       steps: [{ line: 1, text: 'quiet', output: 'kept', startedAt: 0, endedAt: 5 }],
-    }, false)
+    })
     expect(older.steps[0]?.droppedChars).toBe(0)
   })
 })
@@ -273,11 +266,6 @@ describe('block narrowing', () => {
     // poll on its first tick and froze the bar.
     expect(isSettledBlock({ kind: 'tool-call', name: 'shell_progress_pwsh', argsRaw: '{}' })).toBe(false)
     expect(isSettledBlock(null)).toBe(false)
-  })
-
-  it('reads failure off the settled arm only', () => {
-    expect(isErrorBlock({ kind: 'tool-result', isError: true })).toBe(true)
-    expect(isErrorBlock({ kind: 'tool-result', isError: false })).toBe(false)
   })
 
   it('reads arguments from the running arm', () => {
@@ -356,7 +344,7 @@ describe('withNotes', () => {
       { line: 1, text: 'pnpm test', output: '', startedAt: 0, endedAt: 5 },
       { line: 2, text: 'pnpm build', output: '', startedAt: 5, endedAt: 9 },
     ],
-  }, false)
+  })
 
   it('fills the lines that had no note', () => {
     const view = withNotes(bare(), ['跑测试', undefined])
@@ -380,7 +368,7 @@ describe('withNotes', () => {
         startedAt: 0,
         endedAt: 5,
       }],
-    }, false)
+    })
     expect(view.total).toBe(1)
     expect(view.steps[0]?.text).toBe('cd X; build; test')
     expect(view.steps[0]?.displayText).toBe('cd X; \nbuild; \ntest')
@@ -426,7 +414,7 @@ describe('the command total', () => {
         { line: 1, text: 'a', output: '', startedAt: 0, endedAt: 1 },
         { line: 2, text: 'b', output: '', startedAt: 2, endedAt: 3 },
       ],
-    }, false)
+    })
     expect(view.totalElapsedMs).toBe(4_321)
     expect(metaOf({
       kind: 'tool-result',
