@@ -90,6 +90,11 @@
    * of the distinction — deepseek-400 against the pending grey — which is why this may sit a
    * hair above `--step-alpha-pending` without the two states becoming one. */
   --step-alpha-running: 0.4;
+  /* The TITLE's own column. The shell's leading slot is `calc(16px + delta)` wide plus a 6px
+   * gap, so every line that belongs to the command's body starts here. Declared ONCE, for the
+   * same reason `--card-pad-right` is: the progress line and the lost-output notice have to
+   * start on one column, not on two values that merely look equal. */
+  --card-pad-title: calc(22px + var(--dsh-content-font-delta, 0px));
   /* 4px: the gap between the card's own content box and the step rows' right
    * edge. The COUNTER is the element that lands on that edge, because it is the
    * outermost element of the progress line now that the count sits to the right of
@@ -166,9 +171,8 @@
   user-select: none;
 }
 
-/* Indented to the title, clear of the leading glyph: the shell's own leading
- * slot is `calc(16px + delta)` wide plus a 6px gap. Its RIGHT inset is the
- * shared `--card-pad-right`, the same one the step list uses, so the counter that
+/* Indented to the title (`--card-pad-title`), clear of the leading glyph. Its RIGHT inset is
+ * the shared `--card-pad-right`, the same one the step list uses, so the counter that
  * ENDS this row — the bar's count, now to the right of the bar — ends where the
  * step rows end. *//* The row's box is EXACTLY as tall as the bar it draws — 9px, the track's own height —
  * and it must stay that way. The shell allots a collapsed card its own title row plus
@@ -182,7 +186,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding-left: calc(22px + var(--dsh-content-font-delta, 0px));
+  padding-left: var(--card-pad-title);
   padding-right: var(--card-pad-right);
 }
 
@@ -233,10 +237,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The lost-output notice: a sentence ABOUT the command — part of what it printed is not here —
+ * so it starts on the command's own column (`--card-pad-title`). At the card's edge it read as
+ * a separate section rather than as an annotation on the rows above it.
+ *
+ * A flex row rather than a plain text run, so the triangle rides on the sentence's line the way
+ * the refused card's does in the header: centred on it, at the same optical offset. */
 .notice {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin: 0;
+  padding-left: var(--card-pad-title);
   color: var(--dsw-alias-label-caption, inherit);
   font-size: var(--dsh-content-font-size-secondary, 13px);
+}
+
+/* The notice's triangle IS `.untracked`'s glyph — same size, colour and optical offset — with
+ * only what belongs to the header dropped: the 4px lead-in (this one STARTS the line, so its
+ * box must sit ON the title's column) and the hand cursor (nothing opens here; the sentence is
+ * the whole message). The TWO-CLASS selector is deliberate: it has to win over `.untracked`'s
+ * values without depending on which rule the module emits first. */
+.notice .noticeMark {
+  margin-left: 0;
+  cursor: default;
 }
 
 /* The command's TOTAL time, sitting beside the description in the shell's header row. The

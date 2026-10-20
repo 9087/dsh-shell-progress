@@ -324,7 +324,15 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
           <span className={styles.counter} data-counter="true">{t('row.counter', { done: view.done, total: view.total })}</span>
         </div>
       )}
-      {notice === undefined ? null : <p className={styles.notice}>{notice}</p>}
+      {/* The lost-output notice. Its triangle is the refusal mark's OWN glyph (see
+          `UntrackedMark`), carried WITHOUT a tooltip: the sentence is the whole message, so
+          there is nothing left for a hover card to explain. The glyph is decorative here —
+          the text states the fact — so it is hidden from assistive technology. */}
+      {notice === undefined ? null : (
+        <p className={styles.notice} data-lost-output="true">
+          <span className={`${styles.untracked} ${styles.noticeMark}`} aria-hidden="true">{'\u26A0'}</span>{notice}
+        </p>
+      )}
       {/* The revealed detail scrolls on ITS OWN: the header and the bar above it
           are what the reader was already looking at, and dragging them out of
           view to reach step four is not what expanding a row should do. */}

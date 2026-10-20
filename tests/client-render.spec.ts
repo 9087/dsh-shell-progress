@@ -739,9 +739,15 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     const html = await renderCard(truncatedBlock())
     expect(html, 'the card does not say how much of the output is missing').toContain('row.truncated chars=1234')
     expect(html, 'the card has no truncation marker').toContain('data-card-truncated="true"')
+    // The card-level notice for the same fact, behind the refused card's warning triangle and
+    // WITHOUT its tooltip: the sentence is the whole message, so nothing is left to open.
+    expect(html, 'the card does not state that output was lost').toContain('data-lost-output="true"')
+    expect(html, 'the lost-output notice carries no sentence').toContain('row.partial')
+    expect(html, 'the lost-output notice carries no warning glyph').toContain('\u26A0')
     // A step that lost nothing says nothing: the marker is not decoration.
     const clean = await renderCard(singleStepBlock())
     expect(clean, 'a complete step carries a truncation marker').not.toContain('data-card-truncated=')
+    expect(clean, 'a complete card carries the lost-output notice').not.toContain('data-lost-output=')
   })
 
   // The pin for C-6. The browser cannot run a parser, so a bar drawn before the
