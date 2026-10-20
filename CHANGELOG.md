@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/9087/dsh-shell-progress/compare/v0.6.1...v0.7.0) (2026-10-20)
+
+### Features
+
+* **tools:** run a command as a background job instead of leaving the tool ([4ac933a](https://github.com/9087/dsh-shell-progress/commit/4ac933a4ac9598c1e32906ecf1ec9f25aff2404e))
+
+### Bug Fixes
+
+* **ui:** align the lost-output notice to the title and give it the mark ([75c9ef0](https://github.com/9087/dsh-shell-progress/commit/75c9ef0863d9ca176745d640a0ed8f3a5cb468ba))
+* **ui:** drop the failed-step mark the host never produced ([1e0bcfb](https://github.com/9087/dsh-shell-progress/commit/1e0bcfb944051179d408c99eb695b3716c62fcd6))
+
 ## [0.6.1](https://github.com/9087/dsh-shell-progress/compare/v0.6.0...v0.6.1) (2026-10-19)
 
 ### Bug Fixes
