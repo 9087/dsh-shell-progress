@@ -145,6 +145,15 @@ export interface ProgressView {
   /** Why it was refused, as a code the row translates; absent unless something was refused. */
   readonly refusedReason?: RefusalCode
   /**
+   * Set when the command ran as a BACKGROUND JOB, naming the job it was started under.
+   *
+   * Such a record was written the moment the job STARTED, so it holds the planned statements
+   * and nothing else — no position, no timings, no output. The row draws that state instead
+   * of a bar (which would be claiming a position it cannot know) and says why in the
+   * header's mark. Absent on every other call.
+   */
+  readonly background?: { readonly jobId: string }
+  /**
    * The route a LAZY notes request must use for this card, when the host recorded one.
    *
    * Absent means the card has no way to ask for notes later (no route was available when the
@@ -202,6 +211,7 @@ function assembleRows(
     readonly refused: boolean
     readonly refusedReason?: RefusalCode
     readonly notesRoute?: NotesRoute
+    readonly background?: { readonly jobId: string }
     readonly partial: boolean
     readonly preamble: string
   },
@@ -243,6 +253,7 @@ function assembleRows(
     refused: state.refused,
     ...state.refusedReason === undefined ? {} : { refusedReason: state.refusedReason },
     ...state.notesRoute === undefined ? {} : { notesRoute: state.notesRoute },
+    ...state.background === undefined ? {} : { background: state.background },
     partial: state.partial,
     running: state.running,
     currentIndex: state.currentIndex,
@@ -286,6 +297,7 @@ export function viewFromSettled(
     refused: meta?.refused ?? false,
     ...meta?.refusedReason === undefined ? {} : { refusedReason: meta.refusedReason },
     ...meta?.notesRoute === undefined ? {} : { notesRoute: meta.notesRoute },
+    ...meta?.background === undefined || meta.jobId === undefined ? {} : { background: { jobId: meta.jobId } },
     partial: meta?.partial ?? false,
     preamble: meta?.preamble ?? '',
     totalElapsedMs: meta?.elapsedMs ?? 0,
@@ -493,12 +505,18 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
       endedAt: typeof step.endedAt === 'number' ? step.endedAt : null,
     })
   }
+  // A record with no job id is NOT a background record: the id is what the header states and
+  // what `job_output` needs, so a flag without one says nothing a reader could act on.
+  const background = record.background === true && typeof record.jobId === 'string' && record.jobId.length > 0
+    ? { jobId: record.jobId }
+    : undefined
   if (steps.length === 0) {
     // A REFUSED command's metadata carries ZERO steps, and that emptiness IS the
-    // answer: the refusal planned nothing rather than guessing. Dropping the
-    // metadata here would send the card back to the command's own shape and lose
-    // the refusal, so the flag is what keeps an empty meta alive.
-    if (record.refused !== true) return undefined
+    // answer: the refusal planned nothing rather than guessing. A background record whose
+    // command could not be split carries zero steps for its own reason — the card shows the
+    // command without a bar either way. Dropping either would lose the fact that is the
+    // whole point of the record, so the flag is what keeps an empty meta alive.
+    if (record.refused !== true && background === undefined) return undefined
   }
   // Narrowed, NOT dropped: a reloaded session must still say WHY the command was refused,
   // and the code is what the card translates. A newer host's unknown code reads as no
@@ -511,6 +529,7 @@ export function metaOf(block: unknown): ShellProgressMeta | undefined {
     refused: record.refused === true,
     ...refusedReason === null ? {} : { refusedReason },
     ...notesRoute === undefined ? {} : { notesRoute },
+    ...background === undefined ? {} : { background: true, jobId: background.jobId },
     partial: record.partial === true,
     // Narrowed like the note: a reloaded session keeps the total its card was written with.
     ...typeof record.elapsedMs === 'number' && Number.isFinite(record.elapsedMs) && record.elapsedMs > 0

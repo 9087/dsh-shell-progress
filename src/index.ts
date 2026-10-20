@@ -41,7 +41,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ESCALATION_TARGETS } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ShellExecRequest } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecution } from '@deepseek-ai/dsh-shell'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 // Type-only imports whose module augmentations put `ctx.shell` and
@@ -49,6 +49,8 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-shell'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import { createNonce, looksInstrumented, stripMarkers } from './instrument.ts'
+import { observedSources, processOutcome, runJob } from './background.ts'
+import type { JobRegistryService } from './background.ts'
 import { drain, follow } from './run.ts'
 import { renderShellResult } from './render.ts'
 import type { CanonicalRunResult } from './render.ts'
@@ -307,8 +309,8 @@ function resolveWorkdir(modelWorkdir: string | undefined, exec: ToolRunContext):
   return modelWorkdir
 }
 
-/** The output schema: the `pwsh` tool's canonical shape plus this tool's progress. */
-const OUTPUT_SCHEMA = {
+/** A FOREGROUND call: the `pwsh` tool's canonical shape plus this tool's progress. */
+const FOREGROUND_OUTPUT = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -359,6 +361,10 @@ const OUTPUT_SCHEMA = {
         // NOT required: a record persisted before this field existed still validates, and the
         // card simply shows the generic sentence instead of a reason.
         refusedReason: { type: 'string' },
+        // NOT required: these two arrived with background jobs. A foreground record has
+        // neither, and a record written before they existed validates unchanged.
+        background: { type: 'boolean' },
+        jobId: { type: 'string' },
         // NOT required: a card written before notes existed, or by a host with no route,
         // simply has no lazy hint — the card then asks for nothing.
         notesRoute: {
@@ -404,6 +410,29 @@ const OUTPUT_SCHEMA = {
     },
   },
 } as const
+
+/**
+ * A BACKGROUND call: the command was handed to the job registry and this call returned at
+ * once, so there is no output here — `job_output` carries it, exactly as it does for the
+ * `pwsh` tool's own background arm.
+ *
+ * Its progress record is the PLANNED shape only — the statements, no timings and no output
+ * — because the result was written the moment the job started. The card states that
+ * instead of drawing a bar it cannot fill (see `ShellProgressMeta.background`), and the
+ * declaration below is the foreground arm's OWN object, not a second copy of it.
+ */
+const BACKGROUND_OUTPUT = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: { type: 'string', required: true, const: 'background' },
+    jobId: { type: 'string', required: true },
+    progress: FOREGROUND_OUTPUT.properties.progress,
+  },
+} as const
+
+/** The output: whichever arm the call took. */
+const OUTPUT_SCHEMA = { oneOf: [FOREGROUND_OUTPUT, BACKGROUND_OUTPUT] } as const
 
 /**
  * Whether this command may be instrumented at all, and why not when it may not.
@@ -658,16 +687,23 @@ export function apply(ctx: Context, config: Config = {}): void {
           type: 'string',
           description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.',
         },
+        run_in_background: {
+          type: 'boolean',
+          description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies, and the command runs unmodified so its output is byte-exact.',
+        },
       },
       output: {
         schema: OUTPUT_SCHEMA,
-        render: (_args, value) => [{
-          type: 'text',
-          text: renderShellResult(value as unknown as CanonicalRunResult, escalationModes),
-        }],
+        render: (_args, value) => {
+          const arm = value as unknown as { readonly kind: string; readonly jobId?: string }
+          // The background arm's model-facing text is the shell tool's own, word for word:
+          // the model then collects the output with `job_output` exactly as it would there.
+          if (arm.kind === 'background') return [{ type: 'text', text: `started background job ${String(arm.jobId)}` }]
+          return [{ type: 'text', text: renderShellResult(value as unknown as CanonicalRunResult, escalationModes) }]
+        },
         // The whole point of declaring this: it is persisted verbatim on
         // `tool/result`, so a reloaded session rebuilds the card from the log.
-        presentationMeta: (_args, value) => value.progress as unknown as JsonValue,
+        presentationMeta: (_args, value) => (value as { readonly progress: unknown }).progress as JsonValue,
       },
       async execute(args, exec) {
         if (args.command.trim().length === 0) throw new Error('invalid command: expected a non-empty string')
@@ -721,6 +757,60 @@ export function apply(ctx: Context, config: Config = {}): void {
           dshEnv: ctx.shellEnv.collect(exec),
           ...policy === undefined ? {} : { sandboxPolicy: policy },
           signal: exec.signal,
+        }
+
+        // A BACKGROUND COMMAND IS NOT INSTRUMENTED. Its output belongs to the job, and the
+        // model reads it there with `job_output`; a marker line in that stream would be real
+        // output the model sees, and the card cannot follow a run that outlives the call
+        // anyway (see the card's background arm). So the command goes over exactly as written,
+        // the job's pull sources take it from the shell's non-consuming observers, and the
+        // call returns at once with the job's id.
+        if (args.run_in_background === true) {
+          const jobs = ctx.get('jobs') as JobRegistryService | undefined
+          if (jobs === undefined) {
+            throw new Error('shell-progress: run_in_background needs the host job registry, which this host does not mount')
+          }
+          // `command: args.command`, NOT `request.command`: that one carries the MARKED text,
+          // built for the foreground path. A job's output is what the model reads with
+          // `job_output`, so a marker line in it is a line the model actually sees — measured,
+          // before this line existed: `job_output` returned `__DSH_STEP_<nonce>_1__` above the
+          // command's own output.
+          //
+          // `onExpiry: 'none'`: a job has no deadline of its own — `job_kill` is its stop.
+          const resolved = ctx.shell.resolve({ ...request, command: args.command, onExpiry: 'none' })
+          let running: ShellExecution | undefined
+          const jobId = jobs.start({
+            kind: dialect.toolName,
+            label: args.command,
+            ...exec.agent === undefined ? {} : { owner: exec.agent.id },
+            output: observedSources(() => running),
+            run: () => runJob(async (signal) => {
+              running = await ctx.shell.execute({ ...resolved, signal })
+              return running
+            }, processOutcome),
+          })
+          return {
+            kind: 'background' as const,
+            jobId,
+            progress: {
+              v: META_VERSION,
+              instrumented: false,
+              refused: false,
+              background: true,
+              jobId,
+              partial: false,
+              preamble: '',
+              // The PLANNED statements, and nothing else: nothing had run when this record was
+              // written, and the card says so rather than drawing a position it cannot know.
+              steps: split.steps.map((step) => ({
+                line: step.line,
+                text: step.text,
+                output: '',
+                startedAt: null,
+                endedAt: null,
+              })),
+            } satisfies ShellProgressMeta,
+          }
         }
 
         const created = Date.now()

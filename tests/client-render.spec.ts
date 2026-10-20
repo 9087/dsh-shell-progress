@@ -224,6 +224,32 @@ function truncatedBlock(): Record<string, unknown> {
 }
 
 /**
+ * A settled call that started a BACKGROUND JOB: the record was written the moment the job
+ * started, so every step is planned and none has run. The card states the job instead of
+ * drawing a position it cannot know.
+ */
+function backgroundBlock(): Record<string, unknown> {
+  const command = 'pnpm run build\npnpm test'
+  return {
+    ...settledBlock(),
+    call: { name: 'shell_progress_pwsh', argsRaw: JSON.stringify({ command, description: 'background demo' }) },
+    meta: {
+      v: 1,
+      instrumented: false,
+      refused: false,
+      background: true,
+      jobId: 'job-7',
+      partial: false,
+      preamble: '',
+      steps: [
+        { line: 1, text: 'pnpm run build', output: '', startedAt: null, endedAt: null },
+        { line: 2, text: 'pnpm test', output: '', startedAt: null, endedAt: null },
+      ],
+    },
+  }
+}
+
+/**
  * The four-step settled call with each step's output REPLACED.
  *
  * The card has three edges the four uniform fixture outputs never reach: output
@@ -748,6 +774,21 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     const clean = await renderCard(singleStepBlock())
     expect(clean, 'a complete step carries a truncation marker').not.toContain('data-card-truncated=')
     expect(clean, 'a complete card carries the lost-output notice').not.toContain('data-lost-output=')
+  })
+
+  // A BACKGROUND job. The record is the plan and nothing else, so the card must say what it
+  // is — in the TITLE, the way the shell titles every other row — and draw no position: a bar
+  // or a counter here would be claiming a progress the host never wrote down.
+  it('titles a background job as one, and draws no bar, counter or segment', async () => {
+    const html = await renderCard(backgroundBlock())
+    expect(html, 'the background card is titled as an ordinary command').toContain('row.title.background')
+    expect(html, 'the background card carries no background mark').toContain('data-background="true"')
+    // The mark's tooltip is a `Tooltip`, which a static render drops (the wrapper above is
+    // what survives); the browser suite is where its text is read.
+    expect(html, 'a background card drew a progress line').not.toContain('data-progress-line')
+    expect(html, 'a background card drew a counter').not.toContain('data-counter')
+    expect(html, 'a background card drew a bar segment').not.toContain('data-phase=')
+    expect(html, 'a background card drew the total time it never knew').not.toContain('data-total=')
   })
 
   // The pin for C-6. The browser cannot run a parser, so a bar drawn before the

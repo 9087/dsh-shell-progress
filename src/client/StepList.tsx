@@ -226,3 +226,35 @@ export function PlainBody({ command, output, toolName, outputLabel }: {
     </div>
   )
 }
+
+/**
+ * A BACKGROUND command's statements: one command line per row, and NOTHING about their
+ * state.
+ *
+ * This is what the log actually holds for a job: the plan, written the moment the command
+ * started, before any of it ran. So the list keeps the marker column OUT for the same reason
+ * `PlainBody` does — a dot would be the state this record does not have, and a clock would
+ * be a number it never knew. What is left is the one thing that is true: which statements
+ * the command consisted of.
+ * @param props.steps - the planned statements, in source order.
+ * @param props.toolName - names the highlighting grammar, exactly as in the step rows.
+ * @param props.label - the accessible name of the whole list.
+ * @returns the statement rows.
+ */
+export function StatementList({ steps, toolName, label }: {
+  readonly steps: readonly StepRow[]
+  readonly toolName: string
+  readonly label: string
+}): ReactNode {
+  return (
+    <div className={styles.list} data-statement-list="true" aria-label={label}>
+      {steps.map((step) => (
+        <div className={styles.row} key={`${String(step.index)}:${step.text}`} data-statement="true">
+          <div className={styles.headline} data-headline="true">
+            <div className={styles.code} data-code="true">{commandContent(step.text, toolName)}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}

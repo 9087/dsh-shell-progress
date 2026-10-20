@@ -255,6 +255,25 @@ describe('viewFromSettled', () => {
     })
     expect(older.steps[0]?.droppedChars).toBe(0)
   })
+
+  it('carries a background record as a job, without a position', () => {
+    const meta = metaOf({
+      meta: { v: 1, background: true, jobId: 'job-7', instrumented: false, refused: false, partial: false, preamble: '', steps: [] },
+    })
+    expect(meta?.jobId).toBe('job-7')
+    const view = viewFromSettled(meta)
+    expect(view.background).toEqual({ jobId: 'job-7' })
+    // No steps, no bar, no counter: the record knows the plan and nothing else, and a bar
+    // would be claiming a position it never saw.
+    expect(view.bar).toBe('none')
+    expect(view.total).toBe(0)
+  })
+
+  it('drops a background flag that names no job', () => {
+    // The id is what the header states and what `job_output` needs. Without one the flag is
+    // not a fact the card could act on, and an empty record with no other fact is dropped.
+    expect(metaOf({ meta: { v: 1, background: true, partial: false, preamble: '', steps: [] } })).toBeUndefined()
+  })
 })
 
 describe('block narrowing', () => {

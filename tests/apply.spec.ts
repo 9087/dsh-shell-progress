@@ -28,7 +28,7 @@ interface Section {
 }
 
 /** A context good enough for `apply`, with cordis's inject guard reproduced. */
-function fakeContext(options: { readonly connection?: unknown; readonly llm?: unknown } = {}): {
+function fakeContext(options: { readonly connection?: unknown; readonly llm?: unknown; readonly jobs?: unknown } = {}): {
   readonly ctx: unknown
   readonly registered: { readonly name: string; readonly output: unknown }[]
   readonly sections: Section[]
@@ -45,6 +45,9 @@ function fakeContext(options: { readonly connection?: unknown; readonly llm?: un
 
   const base: Record<string, unknown> = {
     llm: options.llm,
+    // The job registry, when the test mounts one. Read through `ctx.get`, so it is not in
+    // `KNOWN_SERVICES`: an absent registry is a host that simply has none, not a bug.
+    jobs: options.jobs,
     tools: {
       register: (definition: { name: string; output: unknown }) => {
         registered.push(definition)
@@ -291,5 +294,95 @@ describe('the notes endpoint', () => {
     const { handler } = mount(llm)
     const answer = await handler('notes', notesRequest(['pnpm install --offline', 'pnpm run build']))
     expect((answer.value as { notes: unknown }).notes).toEqual([null, '构建产物'])
+  })
+})
+
+/**
+ * A BACKGROUND call: the command goes to the host's job registry and the tool returns at
+ * once with the job's id. The record written alongside it can only describe the command's
+ * SHAPE, which is what the card draws (see `Row`'s background arm).
+ */
+describe('background jobs', () => {
+  /** The registered tool's `execute`, which this suite is the only one to drive. */
+  function executor(registered: readonly unknown[]): (args: Record<string, unknown>, exec: Record<string, unknown>) => Promise<unknown> {
+    return (registered[0] as { execute: (args: Record<string, unknown>, exec: Record<string, unknown>) => Promise<unknown> }).execute
+  }
+
+  it('starts the command as a job and records that it did', async () => {
+    const started: unknown[] = []
+    const { ctx, registered } = fakeContext({
+      jobs: { start: (job: unknown) => { started.push(job); return 'job-42' } },
+    })
+    apply(ctx as never, {})
+    // Catch the request the job's executor is handed: it is the ONE thing that decides what
+    // the command's output looks like, and the model reads that output.
+    const resolved: unknown[] = []
+    ;(ctx as unknown as { shell: { resolve: (request: unknown) => unknown } }).shell.resolve = (request: unknown) => {
+      resolved.push(request)
+      return {}
+    }
+    const value = await executor(registered)({
+      // ONE statement, so the split needs no parser probe: this suite must not depend on a
+      // shell being installed.
+      command: 'Write-Output 1',
+      description: 'one statement',
+      run_in_background: true,
+    }, { callId: 'call-bg', signal: new AbortController().signal }) as {
+      readonly kind: string
+      readonly jobId: string
+      readonly progress: {
+        readonly background?: boolean
+        readonly jobId?: string
+        readonly instrumented: boolean
+        readonly partial: boolean
+        readonly steps: readonly { readonly text: string }[]
+      }
+    }
+    expect(value.kind).toBe('background')
+    expect(value.jobId).toBe('job-42')
+    // The card's whole fact: this was a job, and which one.
+    expect(value.progress.background).toBe(true)
+    expect(value.progress.jobId).toBe('job-42')
+    // NOT instrumented on purpose — the job's output is what the model reads, and a marker
+    // line in it would be output the model actually sees.
+    expect(value.progress.instrumented).toBe(false)
+    expect(value.progress.steps.map((step) => step.text)).toEqual(['Write-Output 1'])
+
+    // THE COMMAND ITSELF: the plain text, never the marked text the foreground path builds.
+    // Measured live before this was pinned: `job_output` on a real background call returned
+    // `__DSH_STEP_<nonce>_1__` lines above the command's own output, because the spec still
+    // carried `request.command`.
+    const spec = resolved[0] as { readonly command: string; readonly onExpiry?: string }
+    expect(spec.command, 'the background command was instrumented').toBe('Write-Output 1')
+    expect(spec.command, 'the background command carries a step marker').not.toContain('__DSH_STEP_')
+    // No deadline of its own: `job_kill` is a job's stop.
+    expect(spec.onExpiry).toBe('none')
+
+    // The spec the registry was handed: the command as its label, both captured streams as
+    // PULL sources (so `job_output` reads them), and hooks that spawn nothing until run.
+    const job = started[0] as {
+      readonly kind: string
+      readonly label: string
+      readonly output: readonly { readonly channel: string }[]
+      run(): { readonly done: Promise<unknown>; readonly cancel: (reason: string) => void }
+    }
+    expect(job.kind).toBe(TOOL_NAME_PWSH)
+    expect(job.label).toBe('Write-Output 1')
+    expect(job.output.map((source) => source.channel)).toEqual(['stdout', 'stderr'])
+    // A spawn that throws is an OUTCOME, never a rejection — this suite's fake executor
+    // throws, which is exactly the infrastructure-failure path.
+    const outcome = await job.run().done as { readonly status: string; readonly detail: string }
+    expect(outcome.status).toBe('failed')
+    expect(outcome.detail).toContain('execute is not exercised')
+  })
+
+  it('refuses run_in_background on a host with no job registry', async () => {
+    const { ctx, registered } = fakeContext()
+    apply(ctx as never, {})
+    await expect(executor(registered)({
+      command: 'Write-Output 1',
+      description: 'one statement',
+      run_in_background: true,
+    }, { callId: 'call-bg-2', signal: new AbortController().signal })).rejects.toThrow(/job registry/)
   })
 })

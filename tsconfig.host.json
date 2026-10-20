@@ -25,6 +25,7 @@
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
   },
   "files": [
+    "src/background.ts",
     "src/bash.ts",
     "src/bashtree.ts",
     "src/dialect.ts",

@@ -37,7 +37,7 @@ import type { LiveSnapshot, RefusalCode } from '../types.ts'
 import { NS } from './locales.ts'
 import { ProgressBar } from './ProgressBar.tsx'
 import type { ProgressBarLabels } from './ProgressBar.tsx'
-import { PlainBody, StepList } from './StepList.tsx'
+import { PlainBody, StatementList, StepList } from './StepList.tsx'
 import type { StepListLabels } from './StepList.tsx'
 import { argsOf, formatTotal, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
 import type { ProgressView } from './model.ts'
@@ -87,6 +87,28 @@ function UntrackedMark({ label }: { readonly label: string }): ReactNode {
           aria-label={label}
           tabIndex={0}
         >{'\u26A0'}</span>
+      </Tooltip>
+    </span>
+  )
+}
+
+/**
+ * The header's background mark: the SAME warning triangle the refusal mark wears, in the SAME
+ * place — immediately after the title, ahead of the separator and the summary.
+ *
+ * The title already says what this card is ("run a BACKGROUND JOB with …"), so the glyph adds
+ * only "there is something to know here", and the tooltip is that something: the card lists
+ * the command's statements and no progress, because the job outlived the call that started it.
+ * A HAND cursor belongs on it — it opens an explanation — and it is the anchor, so a static
+ * render keeps only the wrapper (which is why the wrapper carries the marker).
+ * @param props.hint - the explanation the tooltip opens.
+ * @returns the mark and its tooltip.
+ */
+function BackgroundMark({ hint }: { readonly hint: string }): ReactNode {
+  return (
+    <span className={styles.untrackedAnchor} data-background="true">
+      <Tooltip label={hint} side="bottom" portal delayMs={120} maxWidth={360}>
+        <span className={styles.untracked} aria-label={hint} tabIndex={0}>{'\u26A0'}</span>
       </Tooltip>
     </span>
   )
@@ -247,15 +269,21 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   // draw a bar from.
   const notice = settled && view.partial ? t('row.partial') : undefined
   const plain = view.refused && view.total === 0
+  // A background call: the command outlives the call that started it, so there is no
+  // position to draw and no output in this record. The card states the command's statements
+  // and says where the rest went (see `BackgroundMark`).
+  const background = view.background
 
 
   return (
     <div className={styles.card}>
       <DisclosureRow
         icon={<PromptGlyph />}
-        title={t('row.title', { tool: toolName })}
+        title={background === undefined
+          ? t('row.title', { tool: toolName })
+          : t('row.title.background', { tool: toolName })}
         open={open}
-        expandable={view.total > 0 || plain}
+        expandable={view.total > 0 || plain || background !== undefined}
         onToggle={() => { setOpen((previous) => !previous) }}
         running={view.running}
         expandOnRowClick
@@ -266,6 +294,9 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
         collapsedContent={(
           <>
             {view.refused ? <UntrackedMark label={untrackedLabel(t, view.refusedReason)} /> : null}
+            {/* The background mark sits in the SAME slot the refusal mark does — immediately
+                after the title — because it is the same kind of statement about the card. */}
+            {background === undefined ? null : <BackgroundMark hint={t('row.background.hint')} />}
             {args.description === undefined ? null : (
               <>
                 <span className={styles.sep} aria-hidden="true" />
@@ -301,8 +332,12 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
        * counter: an empty row would read as "progress is zero" rather than
        * "nothing is known yet". The card's own header above is what identifies
        * the call, and the shell renders the command line and the output.
+       *
+       * A BACKGROUND call draws no bar either, for a different reason: its record was written
+       * when the job STARTED, so a bar could only claim a position the card cannot know. The
+       * header's mark says so instead.
        */}
-      {view.total === 0 ? null : (
+      {view.total === 0 || background !== undefined ? null : (
         <div className={styles.progressLine} data-progress-line="true">
           {/*
            * The counter TRAILS the bar, and it is the outermost element of the group:
@@ -336,13 +371,17 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
           view to reach step four is not what expanding a row should do. */}
       {open ? (
         <div className={styles.steps}>
-          {plain ? (
+          {plain || (background !== undefined && view.steps.length === 0) ? (
             <PlainBody
               command={args.command}
               output={view.preamble}
               toolName={toolName}
               outputLabel={listLabels.outputLabel}
             />
+          ) : background !== undefined ? (
+            // The command's statements, and nothing about their state: the record knows the
+            // plan and no more (see `StatementList`).
+            <StatementList steps={view.steps} toolName={toolName} label={t('row.statements')} />
           ) : (
             <StepList
               view={view}

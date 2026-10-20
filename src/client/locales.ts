@@ -14,10 +14,13 @@ export const NS = 'shell-progress'
 /** English messages (the terminal fallback). */
 export const en = {
   'row.title': 'Run a command with {tool}',
+  'row.title.background': 'Run a background job with {tool}',
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds}s',
   'row.total': 'Total time',
   'row.partial': 'Some output could not be shown in full',
+  'row.background.hint': 'This command ran in the background, so this card holds its statements only — no per-step timings and no output. The job\'s output is in “Background jobs” at the top of the conversation, where it can also be stopped.',
+  'row.statements': 'Command statements',
   'row.untracked': 'This command was not split, so the bar covers the whole command.',
   'row.untracked.reason': ' (reason: {reason})',
   'row.reason.block-comment': 'the command contains a block comment',
@@ -70,10 +73,13 @@ export const en = {
 /** Simplified Chinese messages. */
 export const zh: Record<keyof typeof en, string> = {
   'row.title': '使用 {tool} 运行命令',
+  'row.title.background': '使用 {tool} 运行后台任务',
   'row.counter': '{done}/{total}',
   'row.elapsed': '{seconds} 秒',
   'row.total': '总用时',
   'row.partial': '部分输出未能完整显示',
+  'row.background.hint': '这条命令在后台运行，所以这张卡只有它的语句，没有逐步耗时和输出。输出在会话顶部的「后台任务」里，也可以在那里停止它。',
+  'row.statements': '命令语句',
   'row.untracked': '这条命令没有被切分，进度只代表整条命令。',
   'row.untracked.reason': '（原因：{reason}）',
   'row.reason.block-comment': '命令里有块注释',

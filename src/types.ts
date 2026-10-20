@@ -161,6 +161,18 @@ export interface ShellProgressMeta {
   readonly refused: boolean
   /** Why it was refused, when it was — absent on a command that was instrumented. */
   readonly refusedReason?: RefusalCode
+  /**
+   * True when the command was started as a BACKGROUND JOB instead of being waited for.
+   *
+   * That result is written the moment the job starts, so this record can only describe the
+   * command's SHAPE: the planned statements with no timings and no output. There is nothing
+   * to follow either — the job outlives the call that started it, and the client stops
+   * polling a settled call — so the card states this rather than drawing a bar it cannot
+   * fill (see {@link jobId}).
+   */
+  readonly background?: boolean
+  /** The job a background call was started under: `job_output`, `job_kill`, and the card. */
+  readonly jobId?: string
   /** The route a later request for this card's notes must use, when notes were offered. */
   readonly notesRoute?: NotesRoute
   /** How the note request ended, when one was made (see {@link NotesState}). */
