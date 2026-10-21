@@ -106,6 +106,35 @@ const FIGURE_DESCRIPTION = LOCALE === 'en' ? 'four-step build demo' : '四步构
 const FIGURE_CALL = 'call-figure-hover-1'
 
 /**
+ * A call whose step list does NOT fit the box that shows it — the scroll strip's own
+ * fixture.
+ *
+ * Thirty statements make the expanded card taller than both boxes the shell can hand the
+ * wheel to (its page scroller, and a folded turn's ~400px process box), so at least one of the
+ * strip's two buttons must be enabled the moment the card opens. It is published in the OPEN
+ * turn so a test can expand it without unfolding a finished turn first.
+ */
+const LONG_CALL = 'call-long-1'
+const LONG_COMMAND = Array.from(
+  { length: 30 },
+  (_, index) => `Write-Output "long step ${String(index + 1)}"`,
+).join('\n')
+const LONG_META = {
+  v: 1,
+  instrumented: true,
+  refused: false,
+  partial: false,
+  preamble: '',
+  steps: Array.from({ length: 30 }, (_, index) => ({
+    line: index + 1,
+    text: `Write-Output "long step ${String(index + 1)}"`,
+    output: `long step ${String(index + 1)}`,
+    startedAt: index * 100,
+    endedAt: index * 100 + 80,
+  })),
+}
+
+/**
  * The command the LIVE card reports, and the call id its record is written under.
  *
  * Four top-level steps, each ONE statement so that one line is one step (`& { … }` is
@@ -304,6 +333,24 @@ export function apply(ctx) {
     step: 1,
     message: toolMessage('call-progress-1', '[1/4] fetch\n[2/4] build\n[3/4] test\n[4/4] pack'),
     meta: PROGRESS_META,
+  }, { surfaceOp: 'append' })
+
+  // The over-long step list (see `LONG_CALL`): its card is taller than the box showing it, so
+  // the scroll strip exists the moment it opens. It lives in the FIRST turn on purpose: that
+  // turn is folded in the figure contexts, so a thirty-row card adds no height there and the
+  // README's photographs keep the crop they had.
+  session.append('tool/call', {
+    turn: 1,
+    step: 1,
+    callId: LONG_CALL,
+    name: 'shell_progress_pwsh',
+    arguments: JSON.stringify({ command: LONG_COMMAND, description: 'long list demo' }),
+  })
+  session.append('tool/result', {
+    turn: 1,
+    step: 1,
+    message: toolMessage(LONG_CALL, Array.from({ length: 30 }, (_, index) => `long step ${String(index + 1)}`).join('\n')),
+    meta: LONG_META,
   }, { surfaceOp: 'append' })
 
   session.append('step/end', { turn: 1, step: 1 })

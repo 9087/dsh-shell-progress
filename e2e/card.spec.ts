@@ -80,6 +80,14 @@ const TRUNCATED_CALL = 'call-live-truncated-1'
  * must degrade to the plain shape: the command and its output, no bar, no counter, no rows.
  */
 const REFUSED_CALL = 'call-live-refused-1'
+
+/**
+ * A call whose step list does NOT fit the box showing it — the scroll strip's own card (see
+ * the fixture). Thirty statements make the expanded card taller than either box the shell can
+ * hand the wheel to, so the strip is on screen the moment it opens.
+ */
+const LONG_CALL = 'call-long-1'
+
 const MARKER = 'SHELL_PROGRESS_E2E_SESSION='
 
 /** One step's segment count and the numbers that decide "is this laid out". */
@@ -1523,6 +1531,63 @@ test.describe('the shell_progress card in a real shell', () => {
     await refused.scrollIntoViewIfNeeded()
     await page.screenshot({ path: SHOT.replace('.png', '-refused.png') })
     console.log(`[e2e] refusal shot -> ${SHOT.replace('.png', '-refused.png')}`)
+
+    // ---------------------------------------------------------------------------
+    // A STEP LIST TALLER THAN ITS BOX. The card cannot scroll — it is a clipping box and its
+    // list has no overflow — so the wheel drives whichever ANCESTOR scrolls, and which one
+    // that is depends on the shell's state (a folded turn's process box, or the page-level
+    // scroller; both were measured before this was written). The strip exists only while an
+    // edge is actually out of view, and each button is enabled for its OWN edge.
+    // ---------------------------------------------------------------------------
+    const long = page.locator(`[data-chat-call-id="${LONG_CALL}"]`)
+    await expect(long, 'the fixture never rendered the long card').toBeAttached({ timeout: 60_000 })
+    await revealCard(long)
+    await long.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
+    await revealCard(long)
+    await expect(
+      long.locator('[data-scroll-strip-rail]'),
+      'the over-long card drew no scroll strip',
+    ).toHaveCount(1, { timeout: 20_000 })
+    // Pin the card's own top into the box first, so the enabled set is deterministic: the box
+    // then shows the card top while the list's bottom is still below it.
+    await long.evaluate((node) => { node.scrollIntoView({ block: 'start' }) })
+    const topButton = long.locator('[data-scroll-top]')
+    const bottomButton = long.locator('[data-scroll-bottom]')
+    await expect(topButton, 'the top button is enabled with the card top in view').toBeDisabled()
+    await expect(bottomButton, 'the bottom button is disabled while the list is clipped').toBeEnabled()
+    await page.screenshot({ path: SHOT.replace('.png', '-long-card.png') })
+    console.log(`[e2e] long-card shot -> ${SHOT.replace('.png', '-long-card.png')}`)
+    /** The scroll container's own offset, resolved the same way the component resolves it. */
+    const scrollerTop = async (): Promise<number> => await long.evaluate((node) => {
+      for (let element = node.parentElement; element !== null; element = element.parentElement) {
+        const style = getComputedStyle(element)
+        if (!/^(?:auto|scroll)$/u.test(style.overflowY)) continue
+        if (element.clientHeight <= 0) continue
+        if (element.scrollHeight <= element.clientHeight + 1) continue
+        return element.scrollTop
+      }
+      return -1
+    })
+    const offsetBefore = await scrollerTop()
+    await bottomButton.click()
+    const offsetAfterDown = await scrollerTop()
+    expect(
+      offsetAfterDown,
+      `the down button did not scroll the box (${String(offsetBefore)} -> ${String(offsetAfterDown)})`,
+    ).toBeGreaterThan(offsetBefore)
+    // Roles swap at the list's bottom: its bottom is now in view, the card's top is not.
+    await expect(topButton, 'the top button stayed disabled after scrolling down').toBeEnabled()
+    await expect(bottomButton, 'the bottom button stayed enabled at the list bottom').toBeDisabled()
+    await topButton.click()
+    const offsetAfterUp = await scrollerTop()
+    expect(offsetAfterUp, 'the up button did not scroll back').toBeLessThan(offsetAfterDown)
+    // A SHORT list offers nothing: two disabled buttons on every card would be decoration.
+    const short = page.locator(`[data-chat-call-id="${FIGURE_CALL}"]`)
+    await revealCard(short)
+    await short.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
+    await expect(short.locator('[data-headline]').first(), 'the short card never opened').toBeVisible({ timeout: 10_000 })
+    await expect(short.locator('[data-scroll-strip-rail]'), 'a short card drew a scroll strip').toHaveCount(0)
+    console.log(`[e2e] scroll strip offsets: ${String(offsetBefore)} -> ${String(offsetAfterDown)} -> ${String(offsetAfterUp)}`)
   })
 })
 

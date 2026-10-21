@@ -28,7 +28,7 @@
  * @module dsh-shell-progress/client/Row
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { DisclosureRow, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -42,6 +42,8 @@ import type { StepListLabels } from './StepList.tsx'
 import { argsOf, formatTotal, isSettledBlock, metaOf, viewFromLive, viewFromSettled, withNotes } from './model.ts'
 import type { ProgressView } from './model.ts'
 import { markNotesAsked, notesAsked, rememberNotes, rememberedNotes } from './lazy-notes.ts'
+import { clippedEdges, scrollCardToTop, scrollContainerOf, scrollListToBottom } from './scroll-affordance.ts'
+import type { ClippedEdges } from './scroll-affordance.ts'
 import { notesEnabled } from './notes-preference.ts'
 import type { ProgressSnapshot } from './store.ts'
 import styles from './Row.module.css'
@@ -58,6 +60,25 @@ function PromptGlyph(): ReactNode {
         strokeLinejoin="round"
       />
       <path d="M8.2 10.2h2.9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/**
+ * The scroll strip's own chevron, drawn at the glyph size the shell uses for inline icons.
+ * @param props.direction - which way the button scrolls.
+ * @returns the SVG.
+ */
+function ChevronGlyph({ direction }: { readonly direction: 'up' | 'down' }): ReactNode {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d={direction === 'up' ? 'M3 7.2 6 4.2l3 3' : 'M3 4.8l3 3 3-3'}
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -199,6 +220,12 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
   const [lazyNotes, setLazyNotes] = useState<readonly (string | undefined)[] | undefined>(
     () => rememberedNotes(callId),
   )
+  // The card's own box and the revealed list's box, plus which of the two edges the reader
+  // cannot see. The card never scrolls (see `scroll-affordance`), so these refs are what the
+  // strip measures against whatever ANCESTOR owns the wheel.
+  const cardRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const [clipped, setClipped] = useState<ClippedEdges>({ top: false, bottom: false })
 
   const settled = isSettledBlock(block)
   const args = argsOf(block)
@@ -248,6 +275,50 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
       })
   }, [callId, fetchNotes, lazyNotes, linkedStep, open, recorded])
 
+  // A LONG list outlives its own box, and the shell does not offer an affordance for it: the
+  // card cannot scroll (it is a clipping box), so the wheel drives an ancestor whose identity
+  // depends on the shell's state — a folded turn's process box, or the page-level scroller
+  // (see `scroll-affordance`). This effect therefore finds that container at run time, keeps
+  // re-resolving it (the shell may hand the wheel to the other box as the turn opens), and
+  // reports the two edges the reader cannot see.
+  useEffect(() => {
+    const card = cardRef.current
+    const list = listRef.current
+    if (!open || card === null || list === null) {
+      setClipped((previous) => previous.top || previous.bottom ? { top: false, bottom: false } : previous)
+      return undefined
+    }
+    const update = (): void => {
+      const next = clippedEdges(card, list)
+      // A fresh object on every scroll would re-render forever: keep the previous one when the
+      // two booleans did not change.
+      setClipped((previous) => (previous.top === next.top && previous.bottom === next.bottom ? previous : next))
+    }
+    const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(update) : 0
+    update()
+    let scroller: HTMLElement | undefined
+    const resolve = (): void => {
+      const next = scrollContainerOf(card)
+      if (next === scroller) return
+      scroller?.removeEventListener('scroll', update)
+      scroller = next
+      scroller?.addEventListener('scroll', update, { passive: true })
+    }
+    resolve()
+    const observer = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => { resolve(); update() })
+      : undefined
+    observer?.observe(card)
+    observer?.observe(list)
+    window.addEventListener('resize', update)
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame)
+      scroller?.removeEventListener('scroll', update)
+      observer?.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [open, view.total])
+
   const barLabels: ProgressBarLabels = {
     stepLabel: (row, total) => t('row.stepLabel', { index: row.index, total, line: row.line }),
     truncated: (chars) => t('row.truncated', { chars }),
@@ -276,7 +347,7 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
 
 
   return (
-    <div className={styles.card}>
+    <div className={styles.card} ref={cardRef}>
       <DisclosureRow
         icon={<PromptGlyph />}
         title={background === undefined
@@ -370,7 +441,46 @@ export function ShellProgressRow(props: ShellProgressRowProps): ReactNode {
           are what the reader was already looking at, and dragging them out of
           view to reach step four is not what expanding a row should do. */}
       {open ? (
-        <div className={styles.steps}>
+        <div
+          className={styles.steps}
+          ref={listRef}
+        >
+          {/* The strip exists only when an edge is actually out of view: two disabled buttons
+              on every short card would be decoration. It rides the sticky rail so the reader
+              can reach it after scrolling the card's own top out of sight — a button pinned to
+              the card's corner would leave with it, exactly when it is needed. */}
+          {clipped.top || clipped.bottom ? (
+            <div className={styles.scrollRail} data-scroll-strip-rail="true">
+              <div className={styles.scrollButtons}>
+                <button
+                  type="button"
+                  className={styles.scrollButton}
+                  data-scroll-top="true"
+                  disabled={!clipped.top}
+                  aria-label={t('row.scroll.top')}
+                  title={t('row.scroll.top')}
+                  onClick={() => { if (cardRef.current !== null) scrollCardToTop(cardRef.current) }}
+                >
+                  <ChevronGlyph direction="up" />
+                </button>
+                <button
+                  type="button"
+                  className={styles.scrollButton}
+                  data-scroll-bottom="true"
+                  disabled={!clipped.bottom}
+                  aria-label={t('row.scroll.bottom')}
+                  title={t('row.scroll.bottom')}
+                  onClick={() => {
+                    const card = cardRef.current
+                    const list = listRef.current
+                    if (card !== null && list !== null) scrollListToBottom(card, list)
+                  }}
+                >
+                  <ChevronGlyph direction="down" />
+                </button>
+              </div>
+            </div>
+          ) : null}
           {plain || (background !== undefined && view.steps.length === 0) ? (
             <PlainBody
               command={args.command}
