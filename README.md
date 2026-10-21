@@ -34,7 +34,9 @@ In the hover card, each step gets a one-line comment above its command line, spe
 
 Expanding the card shows the command's steps, one row each: the line's command, plus its time and output; the step in flight carries a running clock.
 
-A command that cannot be split, or that the plugin declines to track, is still ONE command: the card draws one segment, and a `!` after the title explains on hover that the command was not split, so the bar describes the whole command rather than per-step progress. The command itself runs exactly as it does under the `pwsh` tool, and its output obeys the same per-step budget.
+A command the model runs in the background (`run_in_background: true`) is a job, and its card says so: the title reads "run a background job", with the warning mark beside it explaining on hover, and no bar or counter — the record is written the moment the job starts, so a bar could only claim a position it never saw. Expanding the card lists the command's statements; the output stays with the shell, in the **Background jobs** list at the top of the conversation, which also stops the job. The command runs unmodified (so its output is byte-exact), and a long build or test suite no longer holds the turn while it runs.
+
+A command that cannot be split, or that the plugin declines to track, is still ONE command: the card draws one segment, and a `⚠` after the title explains on hover that the command was not split, so the bar describes the whole command rather than per-step progress. The command itself runs exactly as it does under the `pwsh` tool, and its output obeys the same per-step budget.
 
 ## Install
 

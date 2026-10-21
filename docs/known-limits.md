@@ -173,3 +173,38 @@ softened: an unverified entry says so.
       this. The Windows side is measured green here (`pnpm test`, 19 files / 305
       tests, plus the e2e). The Linux side is what the CI run for this fix
       verifies, and it is NOT claimed before that run is green.
+
+12. A background job's card has no progress bar and no per-step output.
+    **accepted — measured, and every alternative channel was checked and rejected**
+    - The marker is a line on the command's stdout, and this plugin can strip it
+      only where it renders the model-facing text itself: the foreground path owns
+      the complete captured stream (`stripMarkers`). A background job's output
+      reaches the model through the job output ring instead — a ring this plugin
+      FILLS but does not render — so a marker line in it is output the model
+      reads. Measured, before background commands ran unmodified: `job_output`
+      returned `__DSH_STEP_<nonce>_1__` above the command's own output.
+    - Filtering markers out of the ring inside the pull source
+      (`src/background.ts`) cannot be sound. A read may split a line; a `lossy`
+      read can leave a marker tail with no prefix to match; a command that prints
+      without a terminating newline merges its text with the next marker's line,
+      where whole-line filtering would delete the command's own output; and a
+      truncated stream's spill file is read straight from the source, bypassing
+      any filter.
+    - The non-output channels were each checked. A named pipe is refused in the
+      confined modes. The ring's `log` channel is documented as observer-only, but
+      the shell tool's job renderer concatenates every non-stderr chunk
+      (`ringDelta`), so it reaches the model too. A side file needs a path both the
+      command and the plugin know: under `workspace-write` the only writable
+      private temp directory is random and per session, created inside
+      `dsh-sandbox-local` (`mkdtempSync(join(tmpdir(), 'dsh-'))`) and never
+      surfaced to plugins, while a file in the workspace itself would show up in
+      the command's own `git status` — a change to output this plugin promises is
+      byte-identical.
+    - Reading that directory out of the sandbox's live object graph
+      (`ctx.get('sandbox')` → `tempCapabilities` / `materializeAclGrant`) works at
+      runtime, but it pins correctness to two private names in another published
+      package and is Windows-only, so it was rejected.
+    - What would close it: an upstream seam change that hands the caller a
+      writable scratch path per execution (or structured step events). Until then
+      the card states the job, lists the command's statements, and points at the
+      shell's own **Background jobs** list for the output.
