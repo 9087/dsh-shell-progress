@@ -57,10 +57,42 @@ export function clippedEdges(card: HTMLElement, list: HTMLElement): ClippedEdges
   const container = scrollContainerOf(card)
   if (container === undefined) return { top: false, bottom: false }
   const viewport = container.getBoundingClientRect()
+  const visibleBottom = viewport.top + container.clientHeight - composerOcclusion(container)
   return {
     top: card.getBoundingClientRect().top < viewport.top - 1,
-    bottom: list.getBoundingClientRect().bottom > viewport.top + container.clientHeight + 1,
+    bottom: list.getBoundingClientRect().bottom > visibleBottom + 1,
   }
+}
+
+/**
+ * How many pixels of the scrollport's BOTTOM edge the composer covers.
+ *
+ * The shell's composer is a `position: sticky` seat at the foot of the conversation, and it is
+ * 128px tall on this host: the scroll body extends to the window's bottom edge BEHIND it, so
+ * "scroll to the bottom" without this correction leaves the list's last rows behind the input
+ * box — the reader scrolls as far as the bar allows and still cannot see the end. Measured:
+ * the seat's box is `[data-composer-seat]` with `data-conversation-region="composer"`, a
+ * semantic marker rather than a hashed class name.
+ *
+ * A seat is counted only when it actually covers THIS scroller: its box has to overlap the
+ * scroller horizontally and start above the scroller's bottom edge. A seat below the scroller
+ * (or a second pane's seat elsewhere) contributes nothing.
+ *
+ * @param container - the scroll container.
+ * @returns the covered height in pixels, 0 when nothing covers the box.
+ */
+export function composerOcclusion(container: HTMLElement): number {
+  const viewport = container.getBoundingClientRect()
+  const bottom = viewport.top + container.clientHeight
+  let occlusion = 0
+  for (const seat of container.ownerDocument.querySelectorAll('[data-composer-seat]')) {
+    const rect = seat.getBoundingClientRect()
+    if (rect.height <= 0) continue
+    if (rect.right <= viewport.left || rect.left >= viewport.right) continue
+    if (rect.top >= bottom - 1) continue
+    occlusion = Math.max(occlusion, bottom - Math.max(rect.top, viewport.top))
+  }
+  return occlusion
 }
 
 /**
@@ -76,7 +108,8 @@ export function scrollCardToTop(card: HTMLElement): void {
 }
 
 /**
- * Bring the step list's bottom edge to the bottom of its scroll container.
+ * Bring the step list's bottom edge to the bottom of its scroll container — above the
+ * composer, not behind it.
  * @param card - the card's root element.
  * @param list - the step list's own box.
  */
@@ -84,9 +117,13 @@ export function scrollListToBottom(card: HTMLElement, list: HTMLElement): void {
   const container = scrollContainerOf(card)
   if (container === undefined) return
   const viewport = container.getBoundingClientRect()
-  const delta = list.getBoundingClientRect().bottom - (viewport.top + container.clientHeight) + scrollPadding(container, 'Bottom')
+  const visibleBottom = viewport.top + container.clientHeight - composerOcclusion(container)
+  const delta = list.getBoundingClientRect().bottom - visibleBottom + scrollPadding(container, 'Bottom') + BOTTOM_GAP
   scrollWithin(container, delta)
 }
+
+/** Breathing room between the list's last row and whatever bounds the visible box. */
+const BOTTOM_GAP = 8
 
 /**
  * The container's own `scroll-padding-*`, so a scroll lands where the CSS asked rather than

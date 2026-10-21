@@ -1045,12 +1045,36 @@ test.describe('the shell_progress card in a real shell', () => {
           centreY: box.top + box.height / 2,
         }
       })
-    await page.mouse.move(0, 0)
+    // PIN THE CARD FIRST. `hover()` scrolls its target into view, so a card hanging off the
+    // viewport's edge moves the page BETWEEN the resting and grown measurements — which reads
+    // as "the dot grew away from its centre" while the dot itself never moved. Put the card's
+    // top at the scrollport's top, let the scroll settle, then measure both states from there.
+    await card.evaluate((node) => { node.scrollIntoView({ block: 'start' }) })
     await page.waitForTimeout(150)
-    const restingDot = await dotBox()
-    await card.locator('[data-headline]').first().hover()
-    await page.waitForTimeout(200)
-    const grownDot = await dotBox()
+    /** Every scroll offset that could move the dot between two reads. */
+    const scrollFingerprint = async (): Promise<string> => await card.evaluate((node) => {
+      const parts = [String(Math.round(window.scrollY))]
+      for (let element = node.parentElement; element !== null; element = element.parentElement) {
+        parts.push(String(element.scrollTop))
+      }
+      return parts.join('/')
+    })
+    // EVEN PINNED, THE PAGE CAN MOVE BETWEEN THE READS: the live card's clock changes width
+    // every second and the shell follows the tail while it does. Both states are therefore read
+    // at ONE scroll offset, retrying while the transcript is still moving — a comparison taken
+    // across a scroll says nothing about the dot.
+    let restingDot = await dotBox()
+    let grownDot = restingDot
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await page.mouse.move(0, 0)
+      await page.waitForTimeout(150)
+      const fingerprint = await scrollFingerprint()
+      restingDot = await dotBox()
+      await card.locator('[data-headline]').first().hover()
+      await page.waitForTimeout(200)
+      grownDot = await dotBox()
+      if (await scrollFingerprint() === fingerprint) break
+    }
     console.log(`[e2e] dot on hover ${round2(restingDot.width)}x${round2(restingDot.height)} -> ${round2(grownDot.width)}x${round2(grownDot.height)}; centre ${round2(restingDot.centreX)},${round2(restingDot.centreY)} -> ${round2(grownDot.centreX)},${round2(grownDot.centreY)}; marker centre x ${round2(markerBox.centreX)}; first line centre y ${round2(firstLineCentre)}`)
     expect(grownDot.width, 'the dot did not grow on hover').toBeGreaterThan(restingDot.width)
     expect(grownDot.width, 'the grown dot did not stay round').toBe(grownDot.height)
@@ -1575,19 +1599,37 @@ test.describe('the shell_progress card in a real shell', () => {
       offsetAfterDown,
       `the down button did not scroll the box (${String(offsetBefore)} -> ${String(offsetAfterDown)})`,
     ).toBeGreaterThan(offsetBefore)
+    // AND THE LIST'S LAST ROW MUST CLEAR THE COMPOSER. The shell's composer is a sticky seat
+    // over the bottom of the page scroller (128px on this host), so a "scroll to the bottom"
+    // that only reached the scrollport's edge left the last rows behind the input box.
+    const clearance = await long.evaluate((node) => {
+      const card = node.querySelector('[data-progress-line]')?.parentElement ?? node
+      const list = card.lastElementChild
+      const seat = document.querySelector('[data-composer-seat]')
+      if (list === null || seat === null) return null
+      return Math.round(seat.getBoundingClientRect().top - list.getBoundingClientRect().bottom)
+    })
+    expect(
+      clearance,
+      `after scrolling to the bottom the list still runs under the composer (${String(clearance)}px)`,
+    ).not.toBeNull()
+    expect(clearance ?? -1, `the list's bottom is ${String(clearance)}px above the composer's top`).toBeGreaterThanOrEqual(0)
     // Roles swap at the list's bottom: its bottom is now in view, the card's top is not.
     await expect(topButton, 'the top button stayed disabled after scrolling down').toBeEnabled()
     await expect(bottomButton, 'the bottom button stayed enabled at the list bottom').toBeDisabled()
     await topButton.click()
     const offsetAfterUp = await scrollerTop()
     expect(offsetAfterUp, 'the up button did not scroll back').toBeLessThan(offsetAfterDown)
-    // A SHORT list offers nothing: two disabled buttons on every card would be decoration.
+    // A SHORT list offers nothing — but the strip is about an EDGE, not about the list's
+    // height: a four-step card whose own top has been scrolled out of sight legitimately
+    // offers "back to top". Put its top at the viewport's top first, then it must draw none.
     const short = page.locator(`[data-chat-call-id="${FIGURE_CALL}"]`)
     await revealCard(short)
     await short.getByText('shell_progress').first().click({ timeout: 10_000 }).catch(() => {})
     await expect(short.locator('[data-headline]').first(), 'the short card never opened').toBeVisible({ timeout: 10_000 })
+    await short.evaluate((node) => { node.scrollIntoView({ block: 'start' }) })
     await expect(short.locator('[data-scroll-strip-rail]'), 'a short card drew a scroll strip').toHaveCount(0)
-    console.log(`[e2e] scroll strip offsets: ${String(offsetBefore)} -> ${String(offsetAfterDown)} -> ${String(offsetAfterUp)}`)
+    console.log(`[e2e] scroll strip offsets: ${String(offsetBefore)} -> ${String(offsetAfterDown)} -> ${String(offsetAfterUp)}, composer clearance ${String(clearance)}px`)
   })
 })
 
