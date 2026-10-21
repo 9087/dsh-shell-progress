@@ -238,25 +238,31 @@
   top: 11px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   pointer-events: auto;
 }
 
-/* Narrow, tall, quiet: a 12px chevron in 15×20, outlined with the same border token the
- * shell draws a panel with, so it sits beside the clocks instead of competing with them. */
+/* Narrow, tall, quiet: a 12px chevron in 15.5×20, outlined with the same border token the
+ * shell draws a panel with, so it sits beside the clocks instead of competing with them.
+ * The icon is centred with grid, not flex: a flex row centres on the CONTENT box, and the
+ * 0.5px borders make that an odd half-pixel, which reads as the chevron sitting left. */
 .scrollButton {
   box-sizing: border-box;
-  width: 15px;
+  width: 15.5px;
   height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   padding: 0;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-sm);
   background: var(--dsw-specific-menu, var(--dsw-alias-bg-base));
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+}
+
+/* `display: block` so the icon has no inline-baseline influence inside the grid cell. */
+.scrollButton svg {
+  display: block;
 }
 
 .scrollButton:disabled {

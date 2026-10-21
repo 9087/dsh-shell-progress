@@ -1572,6 +1572,28 @@ test.describe('the shell_progress card in a real shell', () => {
       long.locator('[data-scroll-strip-rail]'),
       'the over-long card drew no scroll strip',
     ).toHaveCount(1, { timeout: 20_000 })
+    // THE CHEVRON IS CENTRED IN ITS BUTTON. A flex row centres on the CONTENT box, and with a
+    // 0.5px border that lands on an odd half-pixel, which reads as the arrow sitting left.
+    const buttons = await long.evaluate((node) => [...node.querySelectorAll('[data-scroll-top], [data-scroll-bottom]')]
+      .map((button) => {
+        const icon = button.querySelector('svg')
+        if (icon === null) return null
+        const box = button.getBoundingClientRect()
+        const ink = icon.getBoundingClientRect()
+        return {
+          deltaX: Math.round(((ink.left + ink.right) / 2 - (box.left + box.right) / 2) * 100) / 100,
+          deltaY: Math.round(((ink.top + ink.bottom) / 2 - (box.top + box.bottom) / 2) * 100) / 100,
+          width: Math.round(box.width * 100) / 100,
+          height: box.height,
+        }
+      }))
+    console.log(`[e2e] scroll buttons ${JSON.stringify(buttons)}`)
+    for (const button of buttons) {
+      expect(button, 'a scroll button lost its icon').not.toBeNull()
+      expect(Math.abs(button?.deltaX ?? 99), 'the chevron is off-centre on x').toBeLessThan(0.01)
+      expect(Math.abs(button?.deltaY ?? 99), 'the chevron is off-centre on y').toBeLessThan(0.01)
+      expect(button?.width, 'the scroll button is not the width the card was tuned for').toBe(15.5)
+    }
     // Pin the card's own top into the box first, so the enabled set is deterministic: the box
     // then shows the card top while the list's bottom is still below it.
     await long.evaluate((node) => { node.scrollIntoView({ block: 'start' }) })
