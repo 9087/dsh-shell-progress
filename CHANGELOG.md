@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/9087/dsh-shell-progress/compare/v0.7.0...v0.8.0) (2026-10-21)
+
+### Features
+
+* **ui:** give an over-long step list a scroll strip ([3f2fe59](https://github.com/9087/dsh-shell-progress/commit/3f2fe59a1940f9d880e982c74029a318ba6b6da5))
+
+### Bug Fixes
+
+* **ui:** keep a scrolled-to bottom above the composer ([d7d9fcc](https://github.com/9087/dsh-shell-progress/commit/d7d9fcceb9877bb305c3977ff8574a41c1ffe5f5))
+* **ui:** tighten the scroll strip's spacing and centre its chevron ([5de5a03](https://github.com/9087/dsh-shell-progress/commit/5de5a038d903965920cba290bf4965f9a906978d))
+
 ## [0.7.0](https://github.com/9087/dsh-shell-progress/compare/v0.6.1...v0.7.0) (2026-10-20)
 
 ### Features
