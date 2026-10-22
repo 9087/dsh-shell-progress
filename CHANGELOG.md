@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1](https://github.com/9087/dsh-shell-progress/compare/v0.8.0...v0.8.1) (2026-10-22)
+
+### Bug Fixes
+
+* **ui:** paint the bar 4px so it lands on whole device pixels ([8469d8c](https://github.com/9087/dsh-shell-progress/commit/8469d8cba5ec5fab2bf0739beb8d600dbdc5fe60))
+
 ## [0.8.0](https://github.com/9087/dsh-shell-progress/compare/v0.7.0...v0.8.0) (2026-10-21)
 
 ### Features

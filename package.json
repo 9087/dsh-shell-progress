@@ -1,6 +1,6 @@
 {
   "name": "dsh-shell-progress",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "DeepSeek Harness plugin: a segmented progress bar for multi-step PowerShell tool calls",
   "packageManager": "pnpm@11.22.0",
   "engines": {
