@@ -1016,10 +1016,14 @@ test.describe('the shell_progress card in a real shell', () => {
     await page.waitForTimeout(120)
     const lifted = await segmentHeights()
     console.log(`[e2e] segment heights flat ${JSON.stringify(flat)} -> hover ${JSON.stringify(lifted)}`)
-    // The COLOUR is what was asked to shrink: 3px at rest, 5px lifted, where the bar used
-    // to paint 9px and 13px. The clip is how the paint stays inside the padding box.
-    expect(flat.painted, 'the resting bar does not paint the 3px it is supposed to').toBe(3)
-    expect(lifted.painted, 'the lifted bar does not paint the 5px it is supposed to').toBe(5)
+    // The COLOUR is what was asked to shrink: 4px at rest, 6px lifted, where the bar used
+    // to paint 9px and 13px. The clip is how the paint stays inside the padding box. FOUR,
+    // not three: 3 CSS px is 3.75 device pixels at 125% scaling, and the browser rounds each
+    // band's device rectangle on its own, so the same bar came out 3 device rows on some cards
+    // and 4 on others — two bar weights in one column of cards. 4px is a whole number of
+    // device pixels at 100%, 125%, 150% and 175%.
+    expect(flat.painted, 'the resting bar does not paint the 4px it is supposed to').toBe(4)
+    expect(lifted.painted, 'the lifted bar does not paint the 6px it is supposed to').toBe(6)
     expect(flat.clip, 'the segment paints its padding too, so the bar is as tall as its box').toBe('content-box')
     // AND THE HOT ZONE DID NOT SHRINK: the box is still the track's 9px, so every pixel
     // of the pointer target the bar had before it still belongs to the segment.

@@ -554,14 +554,18 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(outputBody, 'the output spaces itself away from its command again').toContain('margin:0')
     expect(outputBody, 'the output adds space above itself again').not.toContain('padding-top')
     // The BAR is slimmer than its own box, and this is the CSS half of "smaller, with the
-    // hot zone intact": the segment clips its paint to the content box and takes 1.5px of
+    // hot zone intact": the segment clips its paint to the content box and takes 2.5px of
     // top and bottom padding to make the difference, while its box — the pointer target —
-    // stays the track's 9px. The pixels themselves are measured in a browser.
+    // stays the track's 9px. FOUR painted pixels, not three: 3 CSS px is 3.75 device pixels
+    // at 125% scaling, and the browser rounds each band's device rectangle on its own, so the
+    // same bar came out 3 device rows on some cards and 4 on others. 4px is a whole number of
+    // device pixels at 100%, 125%, 150% and 175%. The pixels themselves are measured in a
+    // browser.
     const segmentRule = /_segment\{([^}]*)\}/u.exec(css)
     expect(segmentRule, 'the segment has no rule of its own').not.toBeNull()
     const segmentBody = segmentRule?.[1] ?? ''
     expect(segmentBody, 'the segment paints its padding, so the bar is as tall as its box').toContain('background-clip:content-box')
-    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:3px 0')
+    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:2.5px 0')
     expect(segmentBody, 'the padding would grow the box instead of insetting the paint').toContain('box-sizing:border-box')
     expect(segmentBody, 'the segment no longer fills the track').toContain('height:100%')
     const trackRule = /_track\{([^}]*)\}/u.exec(css)
@@ -571,10 +575,10 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     // 1px below into the card's scrollable overflow (and a scrollbar in the shell's body).
     // The comment above describes the old 11px box and is kept only as the reason for this.
     const liftRule = /_segment:hover[^{]*\{([^}]*)\}/u.exec(css)
-    expect(liftRule?.[1], 'the lifted segment does not thicken by shrinking its own padding').toBe('padding:2px 0')
+    expect(liftRule?.[1], 'the lifted segment does not thicken by shrinking its own padding').toBe('padding:1.5px 0')
     // The other bar shape follows the same painted height, so switching shapes does not
     // change how thick the bar looks.
-    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thin as the segmented one').toContain('height:3px')
+    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thick as the segmented one').toContain('height:4px')
   })
 
   it('draws one segment per step, each with an accessible name, its command and its output', async () => {

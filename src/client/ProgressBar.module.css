@@ -55,12 +55,19 @@
   /* Top and bottom padding, and `background-clip: content-box` to paint the content box
    * only. The padding moves the PAINTABLE area in while leaving the element's own box —
    * and therefore the hit area, the outline, and this element's computed colour — where
-   * it was: 9px of box with 3px of padding above and below is 3px of colour, centred
+   * it was: 9px of box with 2.5px of padding above and below is 4px of colour, centred
    * on exactly the line the 9px bar occupied. Nothing outside this rule moves: the row's
    * height, the bar's centre line and the hover card's anchor are all still the track's
-   * own 9px. */
+   * own 9px.
+   *
+   * FOUR, not three, and the number is about DEVICE pixels. On a display at 125% (the
+   * common Windows scaling) 3 CSS px is 3.75 device pixels, and the browser rounds each
+   * band's device rectangle on its own — so the same bar came out 3 device rows on some
+   * cards and 4 on others, and a column of closed cards looked like it had two bar
+   * weights. 4 CSS px is a whole number of device pixels at 100% (4), 125% (5), 150% (6)
+   * and 175% (7), so the band is the same weight everywhere. */
   box-sizing: border-box;
-  padding: 3px 0;
+  padding: 2.5px 0;
   border: 0;
   border-radius: 2px;
   background-clip: content-box;
@@ -87,15 +94,15 @@
  * bar whose every segment is already a solid block of colour, where a fill or an
  * opacity cue would have nothing to show.
  *
- * It thickens by REDUCING THE PADDING, not by growing its box: 9px of box is 3px of
- * colour at rest and 5px lifted, and those 2px come out of the padding INSIDE the track.
+ * It thickens by REDUCING THE PADDING, not by growing its box: 9px of box is 4px of
+ * colour at rest and 6px lifted, and those 2px come out of the padding INSIDE the track.
  * An earlier version grew the box instead (an 11px segment over a 9px track), which is
  * 1px above and 1px below the track — and the shell's card body is a scroll container
  * that paints a scrollbar for one pixel of it. Nothing outside the track moves here:
  * the box, the hit area and the row's height are all the 9px they were. */
 .segment:hover,
 .segment[data-linked='true'] {
-  padding: 2px 0;
+  padding: 1.5px 0;
 }
 
 /* Every state below names the SHARED palette (declared once on the card in
@@ -143,13 +150,13 @@
 }
 
 /* The other bar shape — one fill for a command whose total is unknown. Its height follows
- * the segmented bar's PAINTED height (`.segment`'s content box), so switching between the
- * two shapes does not change how thick the bar looks. */
+ * the segmented bar's PAINTED height (`.segment`'s content box, 4px), so switching between
+ * the two shapes does not change how thick the bar looks. */
 .solid {
   position: relative;
   flex: 1 1 auto;
   min-width: 48px;
-  height: 3px;
+  height: 4px;
   border-radius: 2px;
   background-color: var(--dsw-alias-bg-skeleton, currentColor);
   overflow: hidden;
