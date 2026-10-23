@@ -61,6 +61,8 @@ import { bashDialect } from './bash.ts'
 import { pwshDialect } from './pwsh.ts'
 import type { ShellDialect } from './dialect.ts'
 import { StepTracker } from './tracker.ts'
+import { installNotice } from './suggestion.ts'
+import type { SuggestionPair } from './suggestion.ts'
 import { createNotesCache, notesKey, requestStepNotes } from './llm-notes.ts'
 import type { LlmLike } from './llm-notes.ts'
 
@@ -210,6 +212,16 @@ export interface Config {
    * Windows default; a POSIX host sets `['bash']`.
    */
   dialects?: string[]
+  /**
+   * Send a one-line advisory after the NATIVE shell tool runs, pointing the model at this
+   * plugin's tool for the same command (default true).
+   *
+   * It never blocks or rewrites a call; it attaches a `notice` message to the next request
+   * so the model reads it beside the call it just made. One notice for the first native call
+   * of an agent, and one for every relapse into the native tool after the progress tool was
+   * used — at most one per hour, the only brake.
+   */
+  advisory?: boolean
 }
 
 /** Runtime configuration schema for the step-progress tool plugin. */
@@ -220,6 +232,7 @@ export const Config: z<Config> = z.object({
   maxSteps: z.number().default(400),
   liveRetentionMs: z.number().default(300_000),
   dialects: z.array(z.string()).default(['pwsh']),
+  advisory: z.boolean().default(true),
 })
 
 /** One live call's record, answered by the channel's `snapshot` endpoint. */
@@ -1017,6 +1030,14 @@ export function apply(ctx: Context, config: Config = {}): void {
       text: dialects.map((entry) => entry.guidance).join(' '),
     })
   })
+
+  // The advisory notice. The guidance section above states the rule once, at the top of a
+  // long prompt; this one lands NEXT TO the choice — it attaches to the request that follows
+  // a native shell call, which is exactly where the model is about to pick a tool again.
+  // Optional like the section: a deployment that wants no nudge just turns it off.
+  if (config.advisory !== false) {
+    installNotice(ctx, dialects.map((entry): SuggestionPair => ({ native: entry.id, progress: entry.toolName })))
+  }
 
   // Mount the live-progress channel. Without `connection` the bar still draws
   // the steps; only the live position is lost, so this degrades rather than throws.

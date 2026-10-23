@@ -364,6 +364,7 @@ function fakeContext(execute: (command: string) => Promise<unknown>): {
     shellEnv: { collect: () => ({}) },
     systemPrompt: undefined,
     logger: { debug: () => {}, warn: () => {} },
+    on: () => () => {},
     effect: (fn: () => unknown) => fn(),
     inject: (_deps: string[], callback: (context: unknown) => unknown) => callback(ctx),
     get: () => undefined,

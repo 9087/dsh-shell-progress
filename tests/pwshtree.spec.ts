@@ -442,6 +442,7 @@ function toolWithRealExecutor(): { readonly tool: RegisteredTool; readonly hande
     shellEnv: { collect: () => ({}) },
     systemPrompt: undefined,
     logger: { debug: () => {}, warn: () => {} },
+    on: () => () => {},
     effect: (fn: () => unknown) => fn(),
     inject: (_deps: string[], callback: (ctx: unknown) => unknown) => callback(base),
     get: () => undefined,

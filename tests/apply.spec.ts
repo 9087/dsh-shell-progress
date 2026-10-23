@@ -14,7 +14,7 @@
  * not declare through `inject` (static or dynamic) throws the same error.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { apply, inject as declaredInject } from '../src/index.ts'
 import { PROGRESS_CHANNEL, TOOL_NAME_BASH, TOOL_NAME_PWSH } from '../src/types.ts'
 
@@ -27,6 +27,13 @@ interface Section {
   readonly text: string
 }
 
+/** One event listener the plugin registered; only `tools/post-execute` is exercised here. */
+type Listener = (
+  exec: { readonly name: string; readonly parent?: unknown; readonly agent?: object },
+  result: unknown,
+  next: () => Promise<unknown>,
+) => Promise<unknown>
+
 /** A context good enough for `apply`, with cordis's inject guard reproduced. */
 function fakeContext(options: { readonly connection?: unknown; readonly llm?: unknown; readonly jobs?: unknown } = {}): {
   readonly ctx: unknown
@@ -35,12 +42,14 @@ function fakeContext(options: { readonly connection?: unknown; readonly llm?: un
   readonly channels: string[]
   readonly handlers: unknown[]
   readonly dynamicInjections: string[][]
+  readonly listeners: { readonly event: string; readonly handler: Listener }[]
 } {
   const registered: { name: string; output: unknown }[] = []
   const sections: Section[] = []
   const channels: string[] = []
   const handlers: unknown[] = []
   const dynamicInjections: string[][] = []
+  const listeners: { event: string; handler: Listener }[] = []
   const declared = new Set<string>(declaredInject)
 
   const base: Record<string, unknown> = {
@@ -72,6 +81,10 @@ function fakeContext(options: { readonly connection?: unknown; readonly llm?: un
       getSectionOrder: () => 1010,
     },
     logger: { debug: () => {}, warn: () => {} },
+    on: (event: string, handler: unknown) => {
+      listeners.push({ event, handler: handler as Listener })
+      return () => {}
+    },
     effect: (fn: () => unknown) => fn(),
     inject: (deps: string[], callback: (ctx: unknown) => unknown) => {
       for (const dep of deps) declared.add(dep)
@@ -92,7 +105,7 @@ function fakeContext(options: { readonly connection?: unknown; readonly llm?: un
     },
   })
 
-  return { ctx, registered, sections, channels, handlers, dynamicInjections }
+  return { ctx, registered, sections, channels, handlers, dynamicInjections, listeners }
 }
 
 /** A connection surface that records which channel was mounted, and its handler. */
@@ -384,5 +397,126 @@ describe('background jobs', () => {
       description: 'one statement',
       run_in_background: true,
     }, { callId: 'call-bg-2', signal: new AbortController().signal })).rejects.toThrow(/job registry/)
+  })
+})
+
+describe('advisory notice', () => {
+  /** The notice messages a decision carries, if any. */
+  type Notices = readonly {
+    readonly content: readonly { readonly text?: string }[]
+    readonly source: { readonly kind: string; readonly form?: string }
+  }[]
+
+  /** Run the plugin's post-execute listener for one call, as the registry would. */
+  async function dispatch(
+    listeners: { readonly event: string; readonly handler: Listener }[],
+    name: string,
+    options: { readonly parent?: object; readonly agent?: object } = {},
+  ): Promise<Record<string, unknown>> {
+    const listener = listeners.find((entry) => entry.event === 'tools/post-execute')
+    if (listener === undefined) throw new Error('the plugin registered no tools/post-execute listener')
+    return await listener.handler({ name, ...options }, undefined, async () => ({
+      kind: 'accept',
+      content: [{ type: 'text', text: 'ok' }],
+    })) as Record<string, unknown>
+  }
+
+  /** The notice's own text, from the decision it was attached to. */
+  function noticeText(decision: Record<string, unknown>): string {
+    const contexts = decision.additionalContexts as Notices | undefined
+    return contexts?.[0]?.content.map((part) => part.text ?? '').join('') ?? ''
+  }
+
+  it('adds one notice after the first native call, and one only', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, {})
+
+    const first = await dispatch(listeners, 'pwsh')
+    const notices = first.additionalContexts as Notices | undefined
+    expect(notices).toHaveLength(1)
+    expect(notices?.[0]?.source.kind).toBe('shell-progress-suggestion')
+    expect(notices?.[0]?.source.form).toBe('notice')
+    // The text names the tools and the promise, not a parameter: the notice must not need
+    // editing when a tool gains one.
+    expect(noticeText(first)).toContain('shell_progress_pwsh')
+    expect(noticeText(first)).toContain('`pwsh`')
+    expect(noticeText(first)).toContain('same executor')
+    expect(noticeText(first), 'the notice names an internal parameter').not.toContain('run_in_background')
+
+    // The second call of the same session gets nothing: one anchoring reminder, then the
+    // cooldown — there is no count cap and no tenth-call rule any more.
+    expect((await dispatch(listeners, 'pwsh')).additionalContexts).toBeUndefined()
+  })
+
+  it('reports a relapse: a native call after the progress tool was used', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, {})
+    // The agent tried the progress tool first, so its first native call is a relapse, not an
+    // anchor: it is the switch BACK that is worth a word.
+    expect((await dispatch(listeners, 'shell_progress_pwsh')).additionalContexts).toBeUndefined()
+    const relapse = await dispatch(listeners, 'pwsh')
+    expect(relapse.additionalContexts as Notices | undefined).toHaveLength(1)
+    expect(noticeText(relapse)).toContain('shell_progress_pwsh')
+  })
+
+  it('holds the cooldown: one notice an hour per agent', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-23T10:00:00Z'))
+      const { ctx, listeners } = fakeContext()
+      apply(ctx as never, {})
+      expect((await dispatch(listeners, 'pwsh')).additionalContexts, 'the anchor notice').toHaveLength(1)
+
+      // Four minutes later the agent relapses — inside the hour, so the notice is held.
+      await dispatch(listeners, 'shell_progress_pwsh')
+      vi.setSystemTime(new Date('2026-10-23T10:04:00Z'))
+      expect((await dispatch(listeners, 'pwsh')).additionalContexts, 'a notice inside the cooldown').toBeUndefined()
+
+      // Past the hour, the next relapse is worth the word.
+      await dispatch(listeners, 'shell_progress_pwsh')
+      vi.setSystemTime(new Date('2026-10-23T11:05:00Z'))
+      expect((await dispatch(listeners, 'pwsh')).additionalContexts, 'the cooldown outlasted an hour').toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a blocked decision blocked, with the notice attached', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, {})
+    const listener = listeners.find((entry) => entry.event === 'tools/post-execute')
+    if (listener === undefined) throw new Error('the plugin registered no tools/post-execute listener')
+    const feedback = [{ type: 'text', text: 'denied downstream' }]
+    const decision = await listener.handler({ name: 'pwsh' }, undefined, async () => ({ kind: 'block', feedback })) as Record<string, unknown>
+    expect(decision.kind).toBe('block')
+    expect(decision.feedback).toEqual(feedback)
+    expect(decision.additionalContexts as Notices | undefined).toHaveLength(1)
+  })
+
+  it('says nothing about a nested dispatch, where a program chose the tool', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, {})
+    expect((await dispatch(listeners, 'pwsh', { parent: {} })).additionalContexts).toBeUndefined()
+  })
+
+  it('says nothing about non-shell tools, nor about the progress tool itself', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, {})
+    expect((await dispatch(listeners, 'read')).additionalContexts).toBeUndefined()
+    expect((await dispatch(listeners, 'shell_progress_pwsh')).additionalContexts).toBeUndefined()
+  })
+
+  it('names the bash pair when bash is the configured dialect', async () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, { dialects: ['bash'] })
+    const decision = await dispatch(listeners, 'bash')
+    expect(noticeText(decision)).toContain('shell_progress_bash')
+    expect(noticeText(decision)).toContain('`bash`')
+  })
+
+  it('can be turned off, leaving no listener behind', () => {
+    const { ctx, listeners } = fakeContext()
+    apply(ctx as never, { advisory: false })
+    expect(listeners).toHaveLength(0)
   })
 })
