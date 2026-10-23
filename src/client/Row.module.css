@@ -61,12 +61,23 @@
    * bar's own pending alpha on purpose, because the two alphas are not comparable numbers: this
    * marker's base colour is the far stronger tertiary text grey, the bar's is the skeleton grey. */
   --step-alpha-pending-dot: 0.3;
-  --step-state-slow: var(--dsw-alias-state-warn-primary);
-  --step-state-error: var(--dsw-alias-state-error-primary);
+  --step-state-slow: #ffb942;
+  --step-state-error: #f96c6c;
+  /* The two WARN colours are literals, not theme aliases, and mean the same thing in both
+   * themes. They used to be `--dsw-alias-state-warn-primary` (amber, #f59e0b) and
+   * `--dsw-alias-state-error-primary` (a deep red in light, #ec1313, and a brighter one in
+   * dark, #f25a5a): the alias pair made the same state two different weights depending on
+   * the theme — the light theme's red was twice as heavy as the dark one's — while the
+   * blue above is static. A lighter amber and a softer coral put both warning states on the
+   * same footing as the blue, leave the bar readable at its painted 4px, and keep the card
+   * from shouting beside the transcript's own quiet type. Tuned against the rendered bar,
+   * not picked from a palette: #ffb942 at 0.7 saturation reads as amber without the old
+   * token's brown weight, and #f96c6c reads as "this step went long" without the alarm of a
+   * semantic error red. */
   /* How much of that palette's saturation is painted. A bar segment is a solid block of
    * colour — only 4px tall, but the loudest thing in the card — and at full strength the
-   * theme's semantic green, amber and red shout next to the transcript's own quiet text.
-   * Read it down to 0.7 and the states still read as green/amber/red, just calmer.
+   * warning amber and red shout next to the transcript's own quiet text. Read it down to
+   * 0.7 and the states still read as amber/red, just calmer.
    *
    * Declared ONCE, here with the colours, and read by the segment, the dot AND the
    * single-fill bar: the dot and its segment have to stay the same colour (that is what
