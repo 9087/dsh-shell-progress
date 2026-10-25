@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0](https://github.com/9087/dsh-shell-progress/compare/v0.8.1...v0.9.0) (2026-10-25)
+
+### Features
+
+* **host:** nudge the model after a native shell call ([fd31d3e](https://github.com/9087/dsh-shell-progress/commit/fd31d3ebc60b2702bffcfa729b5f3be17fe92777))
+
+### Bug Fixes
+
+* **ui:** give every bar band the same device-pixel height ([6b49638](https://github.com/9087/dsh-shell-progress/commit/6b496380f5f32d026e531aa611fd9fbcb132b6c0))
+* **ui:** retune the bar's warning colours ([86ce523](https://github.com/9087/dsh-shell-progress/commit/86ce523fff83945bb5c3de030574193f9d1f5dbe))
+
 ## [0.8.1](https://github.com/9087/dsh-shell-progress/compare/v0.8.0...v0.8.1) (2026-10-22)
 
 ### Bug Fixes
