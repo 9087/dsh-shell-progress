@@ -47,29 +47,27 @@
 .segment {
   flex: 1 1 auto;
   width: 100%;
-  /* The BOX is the pointer target, and it is the full height of the track — the same
-   * 9px the segment has always been. What the reader SEES is the 4px inside it (below),
-   * so the bar got thinner without the hover hot zone shrinking by a pixel. */
+  /* The BOX is the pointer target, and it is the full height of the track — the same 9px
+   * the segment has always been. What the reader SEES is the 4px inside it (below), so the
+   * bar got thinner without the hover hot zone shrinking by a pixel. */
   height: 100%;
   min-width: 0;
-  /* Top and bottom padding, and `background-clip: content-box` to paint the content box
-   * only. The padding moves the PAINTABLE area in while leaving the element's own box —
-   * and therefore the hit area, the outline, and this element's computed colour — where
-   * it was: 9px of box with 2.5px of padding above and below is 4px of colour, centred
-   * on exactly the line the 9px bar occupied. Nothing outside this rule moves: the row's
-   * height, the bar's centre line and the hover card's anchor are all still the track's
-   * own 9px.
+  /* Top and bottom padding plus `background-clip: content-box`: the padding moves the
+   * PAINTABLE area in while leaving the element's own box — and therefore the hit area, the
+   * outline and the row's height — where it was.
    *
-   * FOUR, not three, and the number is about DEVICE pixels. On a display at 125% (the
-   * common Windows scaling) 3 CSS px is 3.75 device pixels, and the browser rounds each
-   * band's device rectangle on its own — so the same bar came out 3 device rows on some
-   * cards and 4 on others, and a column of closed cards looked like it had two bar
-   * weights. 4 CSS px is a whole number of device pixels at 100% (4), 125% (5), 150% (6)
-   * and 175% (7), so the band is the same weight everywhere. */
+   * The height is a DEVICE-ROUNDED length from the component (`useBandHeight`): a flat 4px
+   * is 4.4 device pixels at 110% zoom and 4.8 at 120%, so the compositor would round every
+   * band on its own. At 100/125/150/175% this is the 4px it has always been. */
   box-sizing: border-box;
-  padding: 2.5px 0;
+  padding: calc((9px - var(--step-band, 4px)) / 2) 0;
   border: 0;
-  border-radius: 2px;
+  /* NO `border-radius`. A 4px band with a 2px radius is painted as a rounded-rect PATH, so
+   * every edge of it is antialiased at whatever fractional device position the card happens
+   * to sit at: one card's band paints five full device rows and the next four plus two half
+   * rows — the "two bar weights" a reader reported even after the height became 4px. A
+   * square band is a plain fill and is painted crisp. */
+  border-radius: 0;
   background-clip: content-box;
   /* The state palette, not a colour: `--step-state-*` is declared once on the card
    * (`Row.module.css`) and read by the step list's dots too, so a segment and the
@@ -102,7 +100,7 @@
  * the box, the hit area and the row's height are all the 9px they were. */
 .segment:hover,
 .segment[data-linked='true'] {
-  padding: 1.5px 0;
+  padding: calc((9px - var(--step-band-lifted, 6px)) / 2) 0;
 }
 
 /* Every state below names the SHARED palette (declared once on the card in
@@ -151,13 +149,15 @@
 
 /* The other bar shape — one fill for a command whose total is unknown. Its height follows
  * the segmented bar's PAINTED height (`.segment`'s content box, 4px), so switching between
- * the two shapes does not change how thick the bar looks. */
+ * the two shapes does not change how thick the bar looks. Square corners for the same
+ * reason the segments have them (see `.segment`): a rounded 4px band is a path, and a path
+ * antialiases its long edges at a fractional position. */
 .solid {
   position: relative;
   flex: 1 1 auto;
   min-width: 48px;
-  height: 4px;
-  border-radius: 2px;
+  height: var(--step-band, 4px);
+  border-radius: 0;
   background-color: var(--dsw-alias-bg-skeleton, currentColor);
   overflow: hidden;
   /* The same saturation as the segmented bar, so switching shapes does not change how

@@ -32,8 +32,8 @@
  * @module dsh-shell-progress/client/ProgressBar
  */
 
-import { useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { HoverCard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ProgressView, StepRow } from './model.ts'
 import { commandContent } from './command-text.tsx'
@@ -202,6 +202,34 @@ function useExactTrack(count: number) {
   return { trackRef, geometry }
 }
 
+/**
+ * The painted band's height in CSS px, rounded to a whole DEVICE pixel.
+ *
+ * A flat 4px is 4.4 device pixels at 110% zoom, 4.8 at 120% and 5.3 at 133% (the ratios a
+ * browser produces when the page itself is zoomed, or a display uses custom scaling), and
+ * the compositor rounds each band's rectangle on its own — so one card paints four device
+ * rows and the next paints five. Rounding the BAND to whole device pixels, and deriving the
+ * padding from it, makes every band paint the same row count at any ratio. At the common
+ * 100/125/150/175% this is the 4px it has always been.
+ * @returns the resting and lifted band heights, in CSS px.
+ */
+function useBandHeight(): { readonly band: number, readonly lifted: number } {
+  /** Both band heights for the current device pixel ratio. */
+  const measure = (): { band: number, lifted: number } => {
+    const ratio = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
+    return { band: Math.round(4 * ratio) / ratio, lifted: Math.round(6 * ratio) / ratio }
+  }
+  const [heights, setHeights] = useState(measure)
+  useEffect(() => {
+    // Zoom changes `devicePixelRatio` without necessarily changing the layout, and a
+    // ResizeObserver would not fire for it; the window's resize event does.
+    const update = (): void => setHeights(measure())
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return heights
+}
+
 /** One always-visible row: the bar itself and the running step's clock. */
 export function ProgressBar({ view, toolName, labels, onHoverStep, linkedStep }: {
   view: ProgressView
@@ -227,13 +255,20 @@ export function ProgressBar({ view, toolName, labels, onHoverStep, linkedStep }:
   // Hooks run before the early returns below, and `view.steps` is empty for the other
   // two bar shapes, which is how the hook is told there is nothing to measure.
   const { trackRef, geometry } = useExactTrack(view.steps.length)
+  const band = useBandHeight()
+  // Both bar shapes read these two variables (`ProgressBar.module.css`): the segmented one
+  // builds its padding from them, the solid one is the band itself.
+  const bandStyle = {
+    '--step-band': `${String(band.band)}px`,
+    '--step-band-lifted': `${String(band.lifted)}px`,
+  } as CSSProperties
 
   if (view.bar === 'none') return null
 
   if (view.bar === 'solid') {
     const percent = view.total === 0 ? 0 : Math.round((view.done / view.total) * 100)
     return (
-      <div className={styles.bar}>
+      <div className={styles.bar} style={bandStyle}>
         <div
           className={styles.solid}
           role="progressbar"
@@ -256,7 +291,7 @@ export function ProgressBar({ view, toolName, labels, onHoverStep, linkedStep }:
     : formatSeconds(row.phase === 'running' ? view.currentElapsedMs : row.durationMs)
 
   return (
-    <div className={styles.bar}>
+    <div className={styles.bar} style={bandStyle}>
       <div
         ref={trackRef}
         className={styles.track}

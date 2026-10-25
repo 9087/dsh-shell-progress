@@ -554,31 +554,34 @@ describe('the built client bundle, rendered', () => {  it('injects one styleshee
     expect(outputBody, 'the output spaces itself away from its command again').toContain('margin:0')
     expect(outputBody, 'the output adds space above itself again').not.toContain('padding-top')
     // The BAR is slimmer than its own box, and this is the CSS half of "smaller, with the
-    // hot zone intact": the segment clips its paint to the content box and takes 2.5px of
-    // top and bottom padding to make the difference, while its box — the pointer target —
-    // stays the track's 9px. FOUR painted pixels, not three: 3 CSS px is 3.75 device pixels
-    // at 125% scaling, and the browser rounds each band's device rectangle on its own, so the
-    // same bar came out 3 device rows on some cards and 4 on others. 4px is a whole number of
-    // device pixels at 100%, 125%, 150% and 175%. The pixels themselves are measured in a
-    // browser.
+    // hot zone intact": the segment clips its paint to the content box and insets it with
+    // padding, while its box — the pointer target — stays the track's 9px. The height is
+    // FOUR device pixels, and it is DERIVED FROM A VARIABLE the component rounds to whole
+    // device pixels (`useBandHeight`): 3 CSS px was 3.75 device pixels at 125% and 4 CSS px
+    // is 4.4 at 110%, so a fixed CSS length makes the compositor round each band on its own
+    // — the "two bar weights" a reader saw. The pixels themselves are measured in a browser.
     const segmentRule = /_segment\{([^}]*)\}/u.exec(css)
     expect(segmentRule, 'the segment has no rule of its own').not.toBeNull()
     const segmentBody = segmentRule?.[1] ?? ''
     expect(segmentBody, 'the segment paints its padding, so the bar is as tall as its box').toContain('background-clip:content-box')
-    expect(segmentBody, 'the segment has no padding for that clip to hide').toContain('padding:2.5px 0')
+    expect(segmentBody, 'the band height is no longer device-rounded').toContain('--step-band')
+    expect(segmentBody, 'the segment has no padding for that clip to hide').toMatch(/padding:calc\(/u)
     expect(segmentBody, 'the padding would grow the box instead of insetting the paint').toContain('box-sizing:border-box')
     expect(segmentBody, 'the segment no longer fills the track').toContain('height:100%')
+    // No radius on the BAND: a 4px rounded rect is a path, and a path antialiases its long
+    // edges at a fractional device position — five full rows on one card, four plus two
+    // half rows on the next. Square corners are a plain fill, which the compositor snaps.
+    expect(segmentBody, 'the band is a rounded path again, so its edges will antialias').toContain('border-radius:0')
     const trackRule = /_track\{([^}]*)\}/u.exec(css)
     expect(trackRule?.[1], 'the track no longer keeps the 9px the row and the card anchor are measured from').toContain('height:9px')
-    // The lifted state thickens INSIDE the track now: it takes 1px off the padding top and
-    // bottom instead of growing the box past the 9px track, which is what put 1px above and
-    // 1px below into the card's scrollable overflow (and a scrollbar in the shell's body).
-    // The comment above describes the old 11px box and is kept only as the reason for this.
+    // The lifted state thickens INSIDE the track: the padding shrinks, the box does not
+    // grow past the 9px track, so nothing enters the card's scrollable overflow.
     const liftRule = /_segment:hover[^{]*\{([^}]*)\}/u.exec(css)
-    expect(liftRule?.[1], 'the lifted segment does not thicken by shrinking its own padding').toBe('padding:1.5px 0')
+    expect(liftRule?.[1], 'the lifted segment does not thicken by shrinking its own padding').toContain('--step-band-lifted')
+    expect(liftRule?.[1], 'the lifted padding is no longer derived from the track').toMatch(/padding:calc\(/u)
     // The other bar shape follows the same painted height, so switching shapes does not
     // change how thick the bar looks.
-    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thick as the segmented one').toContain('height:4px')
+    expect(/_solid\{([^}]*)\}/u.exec(css)?.[1], 'the single-fill bar is not as thick as the segmented one').toContain('height:var(--step-band')
   })
 
   it('draws one segment per step, each with an accessible name, its command and its output', async () => {

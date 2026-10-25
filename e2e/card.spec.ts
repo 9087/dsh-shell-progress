@@ -993,10 +993,10 @@ test.describe('the shell_progress card in a real shell', () => {
     //
     // Three heights are separated here, because the bar got SLIMMER without its hot zone
     // shrinking by a pixel: the element's BOX (the pointer target and the outline), the
-    // COLOUR painted inside it (box minus the 1.5px of top and bottom padding), and the
-    // wrapper `HoverCard` inserted around it (what opens the card). The padding is what
-    // moves the paint in without moving the box.
-    const segmentHeights = async (): Promise<{ box: number; painted: number; hot: number; clip: string }> =>
+    // COLOUR painted inside it (box minus the padding pair), and the wrapper `HoverCard`
+    // inserted around it (what opens the card). The padding is what moves the paint in
+    // without moving the box.
+    const segmentHeights = async (): Promise<{ box: number; painted: number; hot: number; radius: string }> =>
       await segments.first().evaluate((node) => {
         const style = getComputedStyle(node)
         const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
@@ -1006,7 +1006,7 @@ test.describe('the shell_progress card in a real shell', () => {
           // padding pair is exactly the area `background-clip: content-box` paints.
           painted: node.clientHeight - padding,
           hot: node.parentElement?.getBoundingClientRect().height ?? -1,
-          clip: style.backgroundClip,
+          radius: style.borderRadius,
         }
       })
     await page.mouse.move(0, 0)
@@ -1017,14 +1017,13 @@ test.describe('the shell_progress card in a real shell', () => {
     const lifted = await segmentHeights()
     console.log(`[e2e] segment heights flat ${JSON.stringify(flat)} -> hover ${JSON.stringify(lifted)}`)
     // The COLOUR is what was asked to shrink: 4px at rest, 6px lifted, where the bar used
-    // to paint 9px and 13px. The clip is how the paint stays inside the padding box. FOUR,
-    // not three: 3 CSS px is 3.75 device pixels at 125% scaling, and the browser rounds each
-    // band's device rectangle on its own, so the same bar came out 3 device rows on some cards
-    // and 4 on others — two bar weights in one column of cards. 4px is a whole number of
-    // device pixels at 100%, 125%, 150% and 175%.
+    // to paint 9px and 13px. The clip is how the paint stays inside the padding box, and
+    // the CSS half of the device-rounding is the `--step-band` variable. The BAND is a
+    // square fill: a rounded 4px rect is painted as a path, and a path antialiases its long
+    // edges at a fractional device position — the "two bar weights" a reader reported.
     expect(flat.painted, 'the resting bar does not paint the 4px it is supposed to').toBe(4)
     expect(lifted.painted, 'the lifted bar does not paint the 6px it is supposed to').toBe(6)
-    expect(flat.clip, 'the segment paints its padding too, so the bar is as tall as its box').toBe('content-box')
+    expect(flat.radius, 'the band is a rounded path again, so its edges will antialias').toBe('0px')
     // AND THE HOT ZONE DID NOT SHRINK: the box is still the track's 9px, so every pixel
     // of the pointer target the bar had before it still belongs to the segment.
     expect(flat.box, 'the segment\'s pointer target got smaller with the painted bar').toBe(9)
