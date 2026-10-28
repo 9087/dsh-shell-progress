@@ -1016,13 +1016,13 @@ test.describe('the shell_progress card in a real shell', () => {
     await page.waitForTimeout(120)
     const lifted = await segmentHeights()
     console.log(`[e2e] segment heights flat ${JSON.stringify(flat)} -> hover ${JSON.stringify(lifted)}`)
-    // The COLOUR is what was asked to shrink: 4px at rest, 6px lifted, where the bar used
+    // The COLOUR is what was asked to shrink: 2px at rest, 4px lifted, where the bar used
     // to paint 9px and 13px. The clip is how the paint stays inside the padding box, and
     // the CSS half of the device-rounding is the `--step-band` variable. The BAND is a
-    // square fill: a rounded 4px rect is painted as a path, and a path antialiases its long
+    // square fill: a rounded rect is painted as a path, and a path antialiases its long
     // edges at a fractional device position — the "two bar weights" a reader reported.
-    expect(flat.painted, 'the resting bar does not paint the 4px it is supposed to').toBe(4)
-    expect(lifted.painted, 'the lifted bar does not paint the 6px it is supposed to').toBe(6)
+    expect(flat.painted, 'the resting bar does not paint the 2px it is supposed to').toBe(2)
+    expect(lifted.painted, 'the lifted bar does not paint the 4px it is supposed to').toBe(4)
     expect(flat.radius, 'the band is a rounded path again, so its edges will antialias').toBe('0px')
     // AND THE HOT ZONE DID NOT SHRINK: the box is still the track's 9px, so every pixel
     // of the pointer target the bar had before it still belongs to the segment.

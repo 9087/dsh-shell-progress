@@ -48,7 +48,7 @@
   flex: 1 1 auto;
   width: 100%;
   /* The BOX is the pointer target, and it is the full height of the track — the same 9px
-   * the segment has always been. What the reader SEES is the 4px inside it (below), so the
+   * the segment has always been. What the reader SEES is the 2px inside it (below), so the
    * bar got thinner without the hover hot zone shrinking by a pixel. */
   height: 100%;
   min-width: 0;
@@ -56,17 +56,17 @@
    * PAINTABLE area in while leaving the element's own box — and therefore the hit area, the
    * outline and the row's height — where it was.
    *
-   * The height is a DEVICE-ROUNDED length from the component (`useBandHeight`): a flat 4px
-   * is 4.4 device pixels at 110% zoom and 4.8 at 120%, so the compositor would round every
-   * band on its own. At 100/125/150/175% this is the 4px it has always been. */
+   * The height is a DEVICE-ROUNDED length from the component (`useBandHeight`): a flat 2px
+   * is 2.2 device pixels at 110% zoom and 2.4 at 120%, so the compositor would round every
+   * band on its own. At 100/125/150/175% this is the 2px it is now. */
   box-sizing: border-box;
-  padding: calc((9px - var(--step-band, 4px)) / 2) 0;
+  padding: calc((9px - var(--step-band, 2px)) / 2) 0;
   border: 0;
-  /* NO `border-radius`. A 4px band with a 2px radius is painted as a rounded-rect PATH, so
-   * every edge of it is antialiased at whatever fractional device position the card happens
-   * to sit at: one card's band paints five full device rows and the next four plus two half
-   * rows — the "two bar weights" a reader reported even after the height became 4px. A
-   * square band is a plain fill and is painted crisp. */
+  /* NO `border-radius`. A band with a radius is painted as a rounded-rect PATH, so every
+   * edge of it is antialiased at whatever fractional device position the card happens to sit
+   * at: one card's band paints the full row count and the next one row less plus two half
+   * rows — the "two bar weights" a reader reported. A square band is a plain fill and is
+   * painted crisp. */
   border-radius: 0;
   background-clip: content-box;
   /* The state palette, not a colour: `--step-state-*` is declared once on the card
@@ -92,15 +92,15 @@
  * bar whose every segment is already a solid block of colour, where a fill or an
  * opacity cue would have nothing to show.
  *
- * It thickens by REDUCING THE PADDING, not by growing its box: 9px of box is 4px of
- * colour at rest and 6px lifted, and those 2px come out of the padding INSIDE the track.
+ * It thickens by REDUCING THE PADDING, not by growing its box: 9px of box is 2px of
+ * colour at rest and 4px lifted, and those 2px come out of the padding INSIDE the track.
  * An earlier version grew the box instead (an 11px segment over a 9px track), which is
  * 1px above and 1px below the track — and the shell's card body is a scroll container
  * that paints a scrollbar for one pixel of it. Nothing outside the track moves here:
  * the box, the hit area and the row's height are all the 9px they were. */
 .segment:hover,
 .segment[data-linked='true'] {
-  padding: calc((9px - var(--step-band-lifted, 6px)) / 2) 0;
+  padding: calc((9px - var(--step-band-lifted, 4px)) / 2) 0;
 }
 
 /* Every state below names the SHARED palette (declared once on the card in
@@ -148,15 +148,15 @@
 }
 
 /* The other bar shape — one fill for a command whose total is unknown. Its height follows
- * the segmented bar's PAINTED height (`.segment`'s content box, 4px), so switching between
- * the two shapes does not change how thick the bar looks. Square corners for the same
- * reason the segments have them (see `.segment`): a rounded 4px band is a path, and a path
+ * the segmented bar's PAINTED height (`.segment`'s content box, 2px today), so switching
+ * between the two shapes does not change how thick the bar looks. Square corners for the
+ * same reason the segments have them (see `.segment`): a rounded band is a path, and a path
  * antialiases its long edges at a fractional position. */
 .solid {
   position: relative;
   flex: 1 1 auto;
   min-width: 48px;
-  height: var(--step-band, 4px);
+  height: var(--step-band, 2px);
   border-radius: 0;
   background-color: var(--dsw-alias-bg-skeleton, currentColor);
   overflow: hidden;

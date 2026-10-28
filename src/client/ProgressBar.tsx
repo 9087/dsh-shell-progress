@@ -205,19 +205,18 @@ function useExactTrack(count: number) {
 /**
  * The painted band's height in CSS px, rounded to a whole DEVICE pixel.
  *
- * A flat 4px is 4.4 device pixels at 110% zoom, 4.8 at 120% and 5.3 at 133% (the ratios a
- * browser produces when the page itself is zoomed, or a display uses custom scaling), and
- * the compositor rounds each band's rectangle on its own — so one card paints four device
- * rows and the next paints five. Rounding the BAND to whole device pixels, and deriving the
- * padding from it, makes every band paint the same row count at any ratio. At the common
- * 100/125/150/175% this is the 4px it has always been.
+ * A flat CSS length is a fractional number of device pixels at some ratios (2px is 2.2 at
+ * 110% zoom, 2.4 at 120%), and the compositor then rounds each band's rectangle on its own —
+ * so one card paints two device rows and the next three. Rounding the BAND to whole device
+ * pixels, and deriving the padding from it, makes every band paint the same row count at any
+ * ratio. At 100/125/150/175% this is the 2px it is now.
  * @returns the resting and lifted band heights, in CSS px.
  */
 function useBandHeight(): { readonly band: number, readonly lifted: number } {
   /** Both band heights for the current device pixel ratio. */
   const measure = (): { band: number, lifted: number } => {
     const ratio = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
-    return { band: Math.round(4 * ratio) / ratio, lifted: Math.round(6 * ratio) / ratio }
+    return { band: Math.round(2 * ratio) / ratio, lifted: Math.round(4 * ratio) / ratio }
   }
   const [heights, setHeights] = useState(measure)
   useEffect(() => {
