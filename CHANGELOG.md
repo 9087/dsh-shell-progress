@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/9087/dsh-shell-progress/compare/v0.9.0...v0.9.1) (2026-10-28)
+
+### Bug Fixes
+
+* **prompt:** name the tool in the first line of its description ([cc7f03f](https://github.com/9087/dsh-shell-progress/commit/cc7f03f65cac7d1f15b2eb8307338e919b497b59))
+* **ui:** slim the bar band to 2px ([3a13731](https://github.com/9087/dsh-shell-progress/commit/3a13731eeebfb7de6c87d3f58494e13f654a0d79))
+
 ## [0.9.0](https://github.com/9087/dsh-shell-progress/compare/v0.8.1...v0.9.0) (2026-10-25)
 
 ### Features
